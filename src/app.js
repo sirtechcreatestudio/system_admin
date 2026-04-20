@@ -32,7 +32,7 @@ app.use(cors({
 
     return callback(new Error('CORS no permitido: ' + origin));
   },
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   credentials: true
 }));
 
