@@ -16,8 +16,23 @@ const app = express();
 // =========================
 app.use(helmet());
 
+const allowedOrigins = [
+  'http://localhost:5173',
+  'https://sgi.somossoluciones12k.com'
+];
+
 app.use(cors({
-  origin: ['http://localhost:5173'], // Vue dev
+  origin: function (origin, callback) {
+    // Permite requests sin origin (Postman, server-to-server)
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error('CORS no permitido: ' + origin));
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   credentials: true
 }));
 
