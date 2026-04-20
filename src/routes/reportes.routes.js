@@ -319,4 +319,107 @@ router.get('/morosos-excel', async (req, res) => {
   }
 });
 
+// ============================================================
+// REPORTE: CAJA PDF (usando el servicio)
+// ============================================================
+router.get('/caja/:id', async (req, res) => {
+  try {
+    const caja = await prisma.caja.findUnique({
+      where: { id: parseInt(req.params.id) },
+      include: {
+        movimientos_caja: {
+          orderBy: { fecha: 'desc' }
+        },
+        usuarios: true
+      }
+    });
+
+    if (!caja) {
+      return res.status(404).json({ success: false, message: 'Caja no encontrada' });
+    }
+
+    const doc = new PDFDocument({ margin: 30, size: 'A4' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=reporte-caja-${caja.id}.pdf`);
+    doc.pipe(res);
+
+    // Header
+    doc.fontSize(18).font('Helvetica-Bold').text('REPORTE DE CAJA', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(10).font('Helvetica');
+    doc.text(`ID Caja: ${caja.id}`, { align: 'center' });
+    doc.text(`Fecha apertura: ${new Date(caja.fecha_apertura).toLocaleString('es-DO')}`, { align: 'center' });
+    if (caja.fecha_cierre) {
+      doc.text(`Fecha cierre: ${new Date(caja.fecha_cierre).toLocaleString('es-DO')}`, { align: 'center' });
+    }
+    doc.text(`Cajero: ${caja.usuarios?.nombre || 'N/A'}`, { align: 'center' });
+    doc.moveDown(2);
+
+    // Resumen
+    const ingresos = caja.movimientos_caja.filter(m => m.tipo === 'ingreso').reduce((sum, m) => sum + Number(m.monto), 0);
+    const egresos = caja.movimientos_caja.filter(m => m.tipo === 'egreso').reduce((sum, m) => sum + Number(m.monto), 0);
+    const balance = ingresos - egresos;
+
+    doc.fontSize(12).font('Helvetica-Bold').text('RESUMEN', { underline: true });
+    doc.moveDown(0.5);
+    doc.fontSize(10).font('Helvetica');
+    doc.text(`Total Ingresos: RD$ ${ingresos.toLocaleString('es-DO')}`);
+    doc.text(`Total Egresos: RD$ ${egresos.toLocaleString('es-DO')}`);
+    doc.text(`Balance Final: RD$ ${balance.toLocaleString('es-DO')}`);
+    doc.moveDown();
+
+    // Tabla de movimientos
+    doc.fontSize(10).font('Helvetica-Bold').text('DETALLE DE MOVIMIENTOS', { underline: true });
+    doc.moveDown(0.5);
+
+    let y = doc.y;
+    const startX = 50;
+    const colWidths = [100, 200, 100];
+    const headers = ['Fecha', 'Concepto', 'Monto'];
+
+    doc.fontSize(9).font('Helvetica-Bold');
+    let x = startX;
+    headers.forEach((h, i) => {
+      doc.text(h, x, y, { width: colWidths[i], align: 'center' });
+      x += colWidths[i];
+    });
+
+    y += 20;
+    doc.fontSize(8).font('Helvetica');
+
+    for (const m of caja.movimientos_caja) {
+      if (y > 750) {
+        doc.addPage();
+        y = 50;
+        x = startX;
+        doc.fontSize(9).font('Helvetica-Bold');
+        headers.forEach((h, i) => {
+          doc.text(h, x, y, { width: colWidths[i], align: 'center' });
+          x += colWidths[i];
+        });
+        y += 20;
+        doc.fontSize(8).font('Helvetica');
+      }
+
+      x = startX;
+      doc.text(new Date(m.fecha).toLocaleString('es-DO'), x, y, { width: colWidths[0], align: 'center' });
+      x += colWidths[0];
+      doc.text(m.descripcion || '—', x, y, { width: colWidths[1], align: 'left' });
+      x += colWidths[1];
+      
+      const signo = m.tipo === 'ingreso' ? '+' : '-';
+      doc.fillColor(m.tipo === 'ingreso' ? '#16a34a' : '#dc2626')
+        .text(`${signo} RD$ ${Number(m.monto).toLocaleString('es-DO')}`, x, y, { width: colWidths[2], align: 'right' })
+        .fillColor('black');
+
+      y += 18;
+    }
+
+    doc.end();
+  } catch (error) {
+    console.error('Error generando reporte de caja:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 module.exports = router;
