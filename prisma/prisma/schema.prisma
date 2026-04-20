@@ -1,0 +1,371 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model activos_financiados {
+  id          Int                       @id @default(autoincrement())
+  prestamo_id Int?
+  tipo        activos_financiados_tipo?
+  descripcion String?
+  valor       Decimal?                  @db.Decimal(10, 2)
+  prestamos   prestamos?                @relation(fields: [prestamo_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([prestamo_id])
+}
+
+model amortizacion {
+  id             Int                  @id @default(autoincrement())
+  prestamo_id    Int?
+  numero_cuota   Int?
+  capital        Decimal?             @db.Decimal(10, 2)
+  interes        Decimal?             @db.Decimal(10, 2)
+  saldo_restante Decimal?             @db.Decimal(10, 2)
+  fecha_pago     DateTime?            @db.Date
+  estado         amortizacion_estado?
+  prestamos      prestamos?           @relation(fields: [prestamo_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([prestamo_id])
+}
+
+model caja {
+  id               Int                @id @default(autoincrement())
+  usuario_id       Int?
+  fecha_apertura   DateTime?
+  fecha_cierre     DateTime?
+  estado           caja_estado?
+  sucursal_id      Int?
+  usuarios         usuarios?          @relation(fields: [usuario_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  movimientos_caja movimientos_caja[]
+
+  @@index([usuario_id])
+}
+
+model clientes {
+  id              Int               @id @default(autoincrement())
+  nombre          String?           @db.VarChar(100)
+  cedula          String?           @unique @db.VarChar(20)
+  telefono        String?           @db.VarChar(20)
+  email           String?           @db.VarChar(100)
+  direccion       String?
+  estado          clientes_estado?  @default(activo)
+  created_at      DateTime?         @default(now())
+  cuentas_cobrar  cuentas_cobrar[]
+  gestiones_cobro gestiones_cobro[]
+  notificaciones  notificaciones[]
+  prestamos       prestamos[]
+  referencias     referencias[]
+}
+
+model configuracion {
+  clave String  @id @db.VarChar(50)
+  valor String? @db.VarChar(100)
+}
+
+model configuracion_mora {
+  id          Int      @id @default(autoincrement())
+  porcentaje  Decimal? @db.Decimal(5, 2)
+  dias_gracia Int?
+}
+
+model cuentas_cobrar {
+  id          Int                    @id @default(autoincrement())
+  cliente_id  Int?
+  total_deuda Decimal?               @db.Decimal(10, 2)
+  estado      cuentas_cobrar_estado?
+  clientes    clientes?              @relation(fields: [cliente_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([cliente_id])
+}
+
+model cuotas {
+  id                Int       @id @default(autoincrement())
+  prestamo_id       Int
+  numero            Int
+  monto             Decimal   @db.Decimal(10, 2)
+  fecha_vencimiento DateTime
+  fecha_pago        DateTime?
+  monto_pagado      Decimal?  @db.Decimal(10, 2)
+  estado            String    @default("pendiente") @db.VarChar(20)
+  created_at        DateTime  @default(now())
+
+  prestamo prestamos @relation(fields: [prestamo_id], references: [id])
+  pagos    pagos[]
+  moras    moras[]
+}
+
+model gestiones_cobro {
+  id         Int       @id @default(autoincrement())
+  cliente_id Int?
+  usuario_id Int?
+  comentario String?
+  resultado  String?   @db.VarChar(100)
+  fecha      DateTime? @default(now())
+  clientes   clientes? @relation(fields: [cliente_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  usuarios   usuarios? @relation(fields: [usuario_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([cliente_id])
+  @@index([usuario_id])
+}
+
+model historial_cambios {
+  id          Int       @id @default(autoincrement())
+  tabla       String?   @db.VarChar(50)
+  registro_id Int?
+  accion      String?   @db.VarChar(50)
+  usuario_id  Int?
+  fecha       DateTime? @default(now())
+}
+
+model logs_auditoria {
+  id             Int       @id @default(autoincrement())
+  usuario_id     Int?
+  accion         String?   @db.VarChar(100)
+  tabla_afectada String?   @db.VarChar(50)
+  registro_id    Int?
+  ip             String?   @db.VarChar(50)
+  fecha          DateTime? @default(now())
+  usuarios       usuarios? @relation(fields: [usuario_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([usuario_id])
+}
+
+model metodos_pago {
+  id     Int     @id @default(autoincrement())
+  nombre String? @db.VarChar(50)
+}
+
+model moras {
+  id             Int           @id @default(autoincrement())
+  cuota_id       Int?
+  monto          Decimal?      @db.Decimal(10, 2)
+  estado         moras_estado?
+  created_at     DateTime?     @default(now())
+  prestamo_id    Int?
+  dias_atraso    Int?
+  fecha_generada DateTime?     @default(now())
+  cuotas         cuotas?       @relation(fields: [cuota_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  prestamos      prestamos?    @relation(fields: [prestamo_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([cuota_id])
+  @@index([prestamo_id])
+}
+
+model movimientos_caja {
+  id          Int                    @id @default(autoincrement())
+  caja_id     Int?
+  tipo        movimientos_caja_tipo?
+  monto       Decimal?               @db.Decimal(10, 2)
+  descripcion String?
+  fecha       DateTime?              @default(now())
+  caja        caja?                  @relation(fields: [caja_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([caja_id])
+}
+
+model notificaciones {
+  id         Int                    @id @default(autoincrement())
+  cliente_id Int?
+  mensaje    String?
+  tipo       String?                @db.VarChar(50)
+  estado     notificaciones_estado?
+  fecha      DateTime?              @default(now())
+  clientes   clientes?              @relation(fields: [cliente_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([cliente_id])
+}
+
+model pagos {
+  id          Int       @id @default(autoincrement())
+  prestamo_id Int
+  cuota_id    Int
+  monto       Decimal   @db.Decimal(10, 2)
+  fecha_pago  DateTime
+  metodo_pago String    @db.VarChar(50)
+  usuario_id  Int
+  notas       String?
+  created_at  DateTime  @default(now())
+  deleted_at  DateTime?
+
+  prestamo prestamos @relation(fields: [prestamo_id], references: [id])
+  cuota    cuotas    @relation(fields: [cuota_id], references: [id])
+  usuario  usuarios  @relation(fields: [usuario_id], references: [id])
+}
+
+model permisos {
+  id           Int            @id @default(autoincrement())
+  nombre       String         @unique @db.VarChar(100)
+  descripcion  String?        @db.VarChar(255)
+  modulo       String?        @db.VarChar(50)
+  rol_permisos rol_permisos[]
+}
+
+model planes_pago {
+  id             Int         @id @default(autoincrement())
+  nombre         String?     @db.VarChar(50)
+  dias_intervalo Int?
+  prestamos      prestamos[]
+}
+
+model prestamos {
+  id                  Int                   @id @default(autoincrement())
+  cliente_id          Int?
+  tipo_prestamo_id    Int?
+  plan_pago_id        Int?
+  monto               Decimal?              @db.Decimal(10, 2)
+  interes             Decimal?              @db.Decimal(5, 2)
+  plazo               Int?
+  estado              prestamos_estado?
+  fecha_inicio        DateTime?             @db.Date
+  created_at          DateTime?             @default(now())
+  tiene_mora          Boolean?              @default(false)
+  total_mora          Decimal?              @default(0.00) @db.Decimal(10, 2)
+  deleted_at          DateTime?
+  sistema_calculo     String?               @default("personalizado") @db.VarChar(20)
+  frecuencia_pago     String?               @default("mensual") @db.VarChar(15)
+  saldo_actual        Decimal?              @db.Decimal(10, 2)
+
+  activos_financiados activos_financiados[]
+  amortizacion        amortizacion[]
+  cuotas              cuotas[]
+  moras               moras[]
+  pagos               pagos[]
+  clientes            clientes?             @relation(fields: [cliente_id], references: [id])
+  tipos_prestamo      tipos_prestamo?       @relation(fields: [tipo_prestamo_id], references: [id])
+  planes_pago         planes_pago?          @relation(fields: [plan_pago_id], references: [id])
+}
+
+model referencias {
+  id         Int               @id @default(autoincrement())
+  cliente_id Int?
+  nombre     String?           @db.VarChar(100)
+  telefono   String?           @db.VarChar(20)
+  tipo       referencias_tipo?
+  clientes   clientes?         @relation(fields: [cliente_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([cliente_id])
+}
+
+model rol_permisos {
+  rol_id     Int
+  permiso_id Int
+  roles      roles    @relation(fields: [rol_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  permisos   permisos @relation(fields: [permiso_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([rol_id, permiso_id])
+  @@index([permiso_id])
+}
+
+model roles {
+  id           Int            @id @default(autoincrement())
+  nombre       String         @unique @db.VarChar(50)
+  descripcion  String?        @db.VarChar(255)
+  rol_permisos rol_permisos[]
+  usuarios     usuarios[]
+}
+
+model sucursales {
+  id     Int     @id @default(autoincrement())
+  nombre String? @db.VarChar(100)
+}
+
+model tipos_prestamo {
+  id           Int         @id @default(autoincrement())
+  nombre       String?     @db.VarChar(50)
+  tasa_interes Decimal?    @db.Decimal(5, 2)
+  plazo_max    Int?
+  prestamos    prestamos[]
+}
+
+model usuarios {
+  id              Int             @id @default(autoincrement())
+  nombre          String          @db.VarChar(100)
+  email           String          @unique @db.VarChar(100)
+  password        String
+  rol_id          Int
+  estado          usuarios_estado @default(activo)
+  created_at      DateTime        @default(now())
+
+  caja            caja[]
+  gestiones_cobro gestiones_cobro[]
+  logs_auditoria  logs_auditoria[]
+  pagos           pagos[]
+  roles           roles           @relation(fields: [rol_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([rol_id])
+}
+
+// ── ENUMS ──────────────────────────────────────────────────────────
+
+enum activos_financiados_tipo {
+  vehiculo
+  inmueble
+  otro
+}
+
+enum movimientos_caja_tipo {
+  ingreso
+  egreso
+}
+
+enum cuentas_cobrar_estado {
+  al_dia
+  atrasado
+  moroso
+}
+
+enum moras_estado {
+  activa
+  pagada
+  eliminada
+}
+
+enum caja_estado {
+  abierta
+  cerrada
+}
+
+enum notificaciones_estado {
+  pendiente
+  enviado
+}
+
+enum referencias_tipo {
+  personal
+  laboral
+}
+
+enum cuotas_estado {
+  pendiente
+  pagado
+  atrasado
+}
+
+enum usuarios_estado {
+  activo
+  inactivo
+}
+
+enum clientes_estado {
+  activo
+  inactivo
+}
+
+enum amortizacion_estado {
+  pendiente
+  pagado
+  atrasado
+}
+
+enum prestamos_estado {
+  pendiente
+  aprobado
+  activo
+  atrasado
+  pagado
+  castigado
+}
