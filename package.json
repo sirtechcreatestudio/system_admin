@@ -7,24 +7,16 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
-    "prisma:generate": "npx prisma generate",
-    "prisma:migrate": "npx prisma migrate dev",
-    "prisma:studio": "npx prisma studio",
+    "build": "prisma generate",
+    "prisma:generate": "prisma generate",
+    "prisma:push": "prisma db push",
+    "prisma:studio": "prisma studio",
     "seed": "node prisma/seed.js"
   },
   "prisma": {
     "seed": "node prisma/seed.js"
   },
-  "keywords": [
-    "fintech",
-    "prestamos",
-    "cobranza",
-    "backend"
-  ],
-  "author": "ShadowHunt",
-  "license": "ISC",
   "dependencies": {
-    "@prisma/adapter-mariadb": "^7.7.0",
     "@prisma/client": "^5.22.0",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.6",
@@ -35,10 +27,10 @@
     "helmet": "^8.1.0",
     "joi": "^18.1.2",
     "jsonwebtoken": "^9.0.3",
-    "mysql2": "^3.21.0",
     "node-cron": "^4.2.1",
     "pdfkit": "^0.15.2",
     "pino-http": "^11.0.0",
+    "pg": "^8.13.3",
     "zod": "^4.3.6"
   },
   "devDependencies": {
