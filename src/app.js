@@ -16,7 +16,7 @@ const app = express();
 app.use(helmet());
 
 app.use(cors({
-  origin: ['http://localhost:5173', 'https://sgi.somossoluciones12k.com'], // Vue dev
+  origin: ['http://localhost:5173'], // Vue dev
   credentials: true
 }));
 

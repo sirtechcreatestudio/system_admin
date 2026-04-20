@@ -3,19 +3,19 @@ generator client {
 }
 
 datasource db {
-  provider = "mysql"
-  url      = env("DATABASE_URL") 
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model activos_financiados {
   id          Int                       @id @default(autoincrement())
   prestamo_id Int?
   tipo        activos_financiados_tipo?
-  descripcion String?                   @db.Text
+  descripcion String?
   valor       Decimal?                  @db.Decimal(10, 2)
-  prestamos   prestamos?                @relation(fields: [prestamo_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "activos_financiados_ibfk_1")
+  prestamos   prestamos?                @relation(fields: [prestamo_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
-  @@index([prestamo_id], map: "prestamo_id")
+  @@index([prestamo_id])
 }
 
 model amortizacion {
@@ -27,33 +27,33 @@ model amortizacion {
   saldo_restante Decimal?             @db.Decimal(10, 2)
   fecha_pago     DateTime?            @db.Date
   estado         amortizacion_estado?
-  prestamos      prestamos?           @relation(fields: [prestamo_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "amortizacion_ibfk_1")
+  prestamos      prestamos?           @relation(fields: [prestamo_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
-  @@index([prestamo_id], map: "prestamo_id")
+  @@index([prestamo_id])
 }
 
 model caja {
   id               Int                @id @default(autoincrement())
   usuario_id       Int?
-  fecha_apertura   DateTime?          @db.Timestamp(0)
-  fecha_cierre     DateTime?          @db.Timestamp(0)
+  fecha_apertura   DateTime?
+  fecha_cierre     DateTime?
   estado           caja_estado?
   sucursal_id      Int?
-  usuarios         usuarios?          @relation(fields: [usuario_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "caja_ibfk_1")
+  usuarios         usuarios?          @relation(fields: [usuario_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   movimientos_caja movimientos_caja[]
 
-  @@index([usuario_id], map: "usuario_id")
+  @@index([usuario_id])
 }
 
 model clientes {
   id              Int               @id @default(autoincrement())
   nombre          String?           @db.VarChar(100)
-  cedula          String?           @unique(map: "cedula") @db.VarChar(20)
+  cedula          String?           @unique @db.VarChar(20)
   telefono        String?           @db.VarChar(20)
   email           String?           @db.VarChar(100)
-  direccion       String?           @db.Text
+  direccion       String?
   estado          clientes_estado?  @default(activo)
-  created_at      DateTime?         @default(now()) @db.Timestamp(0)
+  created_at      DateTime?         @default(now())
   cuentas_cobrar  cuentas_cobrar[]
   gestiones_cobro gestiones_cobro[]
   notificaciones  notificaciones[]
@@ -77,41 +77,39 @@ model cuentas_cobrar {
   cliente_id  Int?
   total_deuda Decimal?               @db.Decimal(10, 2)
   estado      cuentas_cobrar_estado?
-  clientes    clientes?              @relation(fields: [cliente_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "cuentas_cobrar_ibfk_1")
+  clientes    clientes?              @relation(fields: [cliente_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
-  @@index([cliente_id], map: "idx_cobros")
+  @@index([cliente_id])
 }
 
 model cuotas {
-  id               Int      @id @default(autoincrement())
-  prestamo_id      Int
-  numero           Int
-  monto            Decimal  @db.Decimal(10, 2)
+  id                Int       @id @default(autoincrement())
+  prestamo_id       Int
+  numero            Int
+  monto             Decimal   @db.Decimal(10, 2)
   fecha_vencimiento DateTime
-  fecha_pago       DateTime?  // ← Este campo debe existir
-  monto_pagado     Decimal?   @db.Decimal(10, 2)  // ← Este campo debe existir
-  estado           String   @default("pendiente") @db.VarChar(20)
-  created_at       DateTime @default(now())
-  
+  fecha_pago        DateTime?
+  monto_pagado      Decimal?  @db.Decimal(10, 2)
+  estado            String    @default("pendiente") @db.VarChar(20)
+  created_at        DateTime  @default(now())
+
   prestamo prestamos @relation(fields: [prestamo_id], references: [id])
   pagos    pagos[]
   moras    moras[]
-  
-  @@map("cuotas")
 }
 
 model gestiones_cobro {
   id         Int       @id @default(autoincrement())
   cliente_id Int?
   usuario_id Int?
-  comentario String?   @db.Text
+  comentario String?
   resultado  String?   @db.VarChar(100)
-  fecha      DateTime? @default(now()) @db.Timestamp(0)
-  clientes   clientes? @relation(fields: [cliente_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "gestiones_cobro_ibfk_1")
-  usuarios   usuarios? @relation(fields: [usuario_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "gestiones_cobro_ibfk_2")
+  fecha      DateTime? @default(now())
+  clientes   clientes? @relation(fields: [cliente_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  usuarios   usuarios? @relation(fields: [usuario_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
-  @@index([cliente_id], map: "cliente_id")
-  @@index([usuario_id], map: "usuario_id")
+  @@index([cliente_id])
+  @@index([usuario_id])
 }
 
 model historial_cambios {
@@ -120,7 +118,7 @@ model historial_cambios {
   registro_id Int?
   accion      String?   @db.VarChar(50)
   usuario_id  Int?
-  fecha       DateTime? @default(now()) @db.Timestamp(0)
+  fecha       DateTime? @default(now())
 }
 
 model logs_auditoria {
@@ -130,17 +128,15 @@ model logs_auditoria {
   tabla_afectada String?   @db.VarChar(50)
   registro_id    Int?
   ip             String?   @db.VarChar(50)
-  fecha          DateTime? @default(now()) @db.Timestamp(0)
-  usuarios       usuarios? @relation(fields: [usuario_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "logs_auditoria_ibfk_1")
+  fecha          DateTime? @default(now())
+  usuarios       usuarios? @relation(fields: [usuario_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
-  @@index([usuario_id], map: "usuario_id")
+  @@index([usuario_id])
 }
 
 model metodos_pago {
   id     Int     @id @default(autoincrement())
   nombre String? @db.VarChar(50)
-
- 
 }
 
 model moras {
@@ -148,15 +144,15 @@ model moras {
   cuota_id       Int?
   monto          Decimal?      @db.Decimal(10, 2)
   estado         moras_estado?
-  created_at     DateTime?     @default(now()) @db.Timestamp(0)
+  created_at     DateTime?     @default(now())
   prestamo_id    Int?
   dias_atraso    Int?
-  fecha_generada DateTime?     @default(now()) @db.Timestamp(0)
-  cuotas         cuotas?       @relation(fields: [cuota_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "moras_ibfk_1")
-  prestamos      prestamos?    @relation(fields: [prestamo_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "moras_ibfk_2")
+  fecha_generada DateTime?     @default(now())
+  cuotas         cuotas?       @relation(fields: [cuota_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  prestamos      prestamos?    @relation(fields: [prestamo_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
-  @@index([cuota_id], map: "cuota_id")
-  @@index([prestamo_id], map: "idx_mora")
+  @@index([cuota_id])
+  @@index([prestamo_id])
 }
 
 model movimientos_caja {
@@ -164,42 +160,42 @@ model movimientos_caja {
   caja_id     Int?
   tipo        movimientos_caja_tipo?
   monto       Decimal?               @db.Decimal(10, 2)
-  descripcion String?                @db.Text
-  fecha       DateTime?              @default(now()) @db.Timestamp(0)
-  caja        caja?                  @relation(fields: [caja_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "movimientos_caja_ibfk_1")
+  descripcion String?
+  fecha       DateTime?              @default(now())
+  caja        caja?                  @relation(fields: [caja_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
-  @@index([caja_id], map: "caja_id")
+  @@index([caja_id])
 }
 
 model notificaciones {
   id         Int                    @id @default(autoincrement())
   cliente_id Int?
-  mensaje    String?                @db.Text
+  mensaje    String?
   tipo       String?                @db.VarChar(50)
   estado     notificaciones_estado?
-  fecha      DateTime?              @default(now()) @db.Timestamp(0)
-  clientes   clientes?              @relation(fields: [cliente_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "notificaciones_ibfk_1")
+  fecha      DateTime?              @default(now())
+  clientes   clientes?              @relation(fields: [cliente_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
-  @@index([cliente_id], map: "cliente_id")
+  @@index([cliente_id])
 }
 
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model pagos {
-  id          Int      @id @default(autoincrement())
+  id          Int       @id @default(autoincrement())
   prestamo_id Int
   cuota_id    Int
-  monto       Decimal  @db.Decimal(10, 2)
+  monto       Decimal   @db.Decimal(10, 2)
   fecha_pago  DateTime
-  metodo_pago String   @db.VarChar(50)  // ← String directo, no relación
+  metodo_pago String    @db.VarChar(50)
   usuario_id  Int
-  notas       String?  @db.Text
-  created_at  DateTime @default(now())
+  notas       String?
+  created_at  DateTime  @default(now())
   deleted_at  DateTime?
-  
+
   prestamo prestamos @relation(fields: [prestamo_id], references: [id])
   cuota    cuotas    @relation(fields: [cuota_id], references: [id])
   usuario  usuarios  @relation(fields: [usuario_id], references: [id])
 }
+
 model permisos {
   id           Int            @id @default(autoincrement())
   nombre       String         @unique @db.VarChar(100)
@@ -207,6 +203,7 @@ model permisos {
   modulo       String?        @db.VarChar(50)
   rol_permisos rol_permisos[]
 }
+
 model planes_pago {
   id             Int         @id @default(autoincrement())
   nombre         String?     @db.VarChar(50)
@@ -214,25 +211,24 @@ model planes_pago {
   prestamos      prestamos[]
 }
 
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model prestamos {
   id                  Int                   @id @default(autoincrement())
   cliente_id          Int?
-  tipo_prestamo_id    Int?    // ← Agrega este campo
-  plan_pago_id        Int?    // ← Agrega este campo
+  tipo_prestamo_id    Int?
+  plan_pago_id        Int?
   monto               Decimal?              @db.Decimal(10, 2)
   interes             Decimal?              @db.Decimal(5, 2)
   plazo               Int?
   estado              prestamos_estado?
   fecha_inicio        DateTime?             @db.Date
-  created_at          DateTime?             @default(now()) @db.Timestamp(0)
+  created_at          DateTime?             @default(now())
   tiene_mora          Boolean?              @default(false)
   total_mora          Decimal?              @default(0.00) @db.Decimal(10, 2)
-  deleted_at          DateTime?             @db.Timestamp(0)
+  deleted_at          DateTime?
   sistema_calculo     String?               @default("personalizado") @db.VarChar(20)
   frecuencia_pago     String?               @default("mensual") @db.VarChar(15)
   saldo_actual        Decimal?              @db.Decimal(10, 2)
-  
+
   activos_financiados activos_financiados[]
   amortizacion        amortizacion[]
   cuotas              cuotas[]
@@ -242,25 +238,26 @@ model prestamos {
   tipos_prestamo      tipos_prestamo?       @relation(fields: [tipo_prestamo_id], references: [id])
   planes_pago         planes_pago?          @relation(fields: [plan_pago_id], references: [id])
 }
+
 model referencias {
   id         Int               @id @default(autoincrement())
   cliente_id Int?
   nombre     String?           @db.VarChar(100)
   telefono   String?           @db.VarChar(20)
   tipo       referencias_tipo?
-  clientes   clientes?         @relation(fields: [cliente_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "referencias_ibfk_1")
+  clientes   clientes?         @relation(fields: [cliente_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
-  @@index([cliente_id], map: "cliente_id")
+  @@index([cliente_id])
 }
 
 model rol_permisos {
   rol_id     Int
   permiso_id Int
-  roles      roles    @relation(fields: [rol_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "rol_permisos_ibfk_1")
-  permisos   permisos @relation(fields: [permiso_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "rol_permisos_ibfk_2")
+  roles      roles    @relation(fields: [rol_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  permisos   permisos @relation(fields: [permiso_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@id([rol_id, permiso_id])
-  @@index([permiso_id], map: "permiso_id")
+  @@index([permiso_id])
 }
 
 model roles {
@@ -270,6 +267,7 @@ model roles {
   rol_permisos rol_permisos[]
   usuarios     usuarios[]
 }
+
 model sucursales {
   id     Int     @id @default(autoincrement())
   nombre String? @db.VarChar(100)
@@ -284,23 +282,24 @@ model tipos_prestamo {
 }
 
 model usuarios {
-  id              Int               @id @default(autoincrement())
-  nombre          String            @db.VarChar(100)  // ← Quitar ? (obligatorio)
-  email           String            @unique(map: "email") @db.VarChar(100)  // ← Quitar ? (obligatorio)
-  password        String            @db.Text  // ← Quitar ? (obligatorio)
+  id              Int             @id @default(autoincrement())
+  nombre          String          @db.VarChar(100)
+  email           String          @unique @db.VarChar(100)
+  password        String
   rol_id          Int
-  estado          usuarios_estado   @default(activo)
-  created_at      DateTime          @default(now()) @db.Timestamp(0)
-  
-  // Relaciones
+  estado          usuarios_estado @default(activo)
+  created_at      DateTime        @default(now())
+
   caja            caja[]
   gestiones_cobro gestiones_cobro[]
   logs_auditoria  logs_auditoria[]
   pagos           pagos[]
-  roles           roles             @relation(fields: [rol_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "usuarios_ibfk_1")
+  roles           roles           @relation(fields: [rol_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
-  @@index([rol_id], map: "rol_id")
+  @@index([rol_id])
 }
+
+// ── ENUMS ──────────────────────────────────────────────────────────
 
 enum activos_financiados_tipo {
   vehiculo
