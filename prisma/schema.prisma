@@ -92,10 +92,9 @@ model cuotas {
   monto_pagado      Decimal?  @db.Decimal(10, 2)
   estado            String    @default("pendiente") @db.VarChar(20)
   created_at        DateTime  @default(now())
-
-  prestamo prestamos @relation(fields: [prestamo_id], references: [id])
-  pagos    pagos[]
-  moras    moras[]
+  prestamo          prestamos @relation(fields: [prestamo_id], references: [id])
+  moras             moras[]
+  pagos             pagos[]
 }
 
 model gestiones_cobro {
@@ -190,10 +189,9 @@ model pagos {
   notas       String?
   created_at  DateTime  @default(now())
   deleted_at  DateTime?
-
-  prestamo prestamos @relation(fields: [prestamo_id], references: [id])
-  cuota    cuotas    @relation(fields: [cuota_id], references: [id])
-  usuario  usuarios  @relation(fields: [usuario_id], references: [id])
+  cuota       cuotas    @relation(fields: [cuota_id], references: [id])
+  prestamo    prestamos @relation(fields: [prestamo_id], references: [id])
+  usuario     usuarios  @relation(fields: [usuario_id], references: [id])
 }
 
 model permisos {
@@ -228,15 +226,14 @@ model prestamos {
   sistema_calculo     String?               @default("personalizado") @db.VarChar(20)
   frecuencia_pago     String?               @default("mensual") @db.VarChar(15)
   saldo_actual        Decimal?              @db.Decimal(10, 2)
-
   activos_financiados activos_financiados[]
   amortizacion        amortizacion[]
   cuotas              cuotas[]
   moras               moras[]
   pagos               pagos[]
   clientes            clientes?             @relation(fields: [cliente_id], references: [id])
-  tipos_prestamo      tipos_prestamo?       @relation(fields: [tipo_prestamo_id], references: [id])
   planes_pago         planes_pago?          @relation(fields: [plan_pago_id], references: [id])
+  tipos_prestamo      tipos_prestamo?       @relation(fields: [tipo_prestamo_id], references: [id])
 }
 
 model referencias {
@@ -253,8 +250,8 @@ model referencias {
 model rol_permisos {
   rol_id     Int
   permiso_id Int
-  roles      roles    @relation(fields: [rol_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   permisos   permisos @relation(fields: [permiso_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  roles      roles    @relation(fields: [rol_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@id([rol_id, permiso_id])
   @@index([permiso_id])
@@ -282,24 +279,21 @@ model tipos_prestamo {
 }
 
 model usuarios {
-  id              Int             @id @default(autoincrement())
-  nombre          String          @db.VarChar(100)
-  email           String          @unique @db.VarChar(100)
+  id              Int               @id @default(autoincrement())
+  nombre          String            @db.VarChar(100)
+  email           String            @unique @db.VarChar(100)
   password        String
   rol_id          Int
-  estado          usuarios_estado @default(activo)
-  created_at      DateTime        @default(now())
-
+  estado          usuarios_estado   @default(activo)
+  created_at      DateTime          @default(now())
   caja            caja[]
   gestiones_cobro gestiones_cobro[]
   logs_auditoria  logs_auditoria[]
   pagos           pagos[]
-  roles           roles           @relation(fields: [rol_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  roles           roles             @relation(fields: [rol_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([rol_id])
 }
-
-// ── ENUMS ──────────────────────────────────────────────────────────
 
 enum activos_financiados_tipo {
   vehiculo

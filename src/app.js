@@ -7,6 +7,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const pino = require('pino-http');
+const prisma = require('./lib/prisma');
 
 const app = express();
 
@@ -61,11 +62,26 @@ app.use('/api/v1', require('./routes')); // 🔥 index.js maneja todo
 // =========================
 // ❤️ HEALTH CHECK
 // =========================
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    env: process.env.NODE_ENV
-  });
+
+app.get('/health', async (req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+
+    res.json({
+      status: 'ok',
+      env: process.env.NODE_ENV,
+      db: 'connected'
+    });
+
+  } catch (error) {
+    console.error('DB ERROR:', error);
+
+    res.status(500).json({
+      status: 'error',
+      env: process.env.NODE_ENV,
+      db: 'disconnected'
+    });
+  }
 });
 
 // =========================
