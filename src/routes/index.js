@@ -32,5 +32,8 @@ router.use('/catalogos', require('./catalogos.routes'));
 // 👤 USUARIOS (perfil)
 router.use('/usuarios', require('./usuarios.routes'));
 
+// VEHICULOS
+router.use('/vehiculos', require('./vehiculos.routes'));
+
 
 module.exports = router;
