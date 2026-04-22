@@ -80,99 +80,131 @@ const VehiculoService = {
   },
 
   async create(data) {
-    try {
-      const { tipo, marca, modelo, anio, color, chassis, placa, precio, detalles, cliente_id } = data;
+  try {
+    // 🧼 Sanitizar datos
+    const tipo = data.tipo || 'motor';
+    const marca = data.marca?.trim();
+    const modelo = data.modelo?.trim();
+    const anio = Number(data.anio);
 
-      // ✅ Validaciones
-      if (!marca || marca.trim().length < 2) {
-        throw new Error('La marca es requerida y debe tener al menos 2 caracteres');
+    const color = data.color?.trim() || null;
+    const chassis = data.chassis?.trim() || null;
+    const placa = data.placa?.trim() || null;
+
+    const precio = data.precio !== undefined && data.precio !== null && data.precio !== ''
+      ? Number(data.precio)
+      : null;
+
+    const detalles = data.detalles?.trim() || null;
+
+    const cliente_id = data.cliente_id && !isNaN(Number(data.cliente_id))
+      ? Number(data.cliente_id)
+      : null;
+
+    // 🧠 Validaciones
+    if (!marca || marca.length < 2) {
+      throw new Error('La marca es requerida y debe tener al menos 2 caracteres');
+    }
+
+    if (!modelo || modelo.length < 1) {
+      throw new Error('El modelo es requerido');
+    }
+
+    if (!anio || isNaN(anio) || anio < 1900 || anio > new Date().getFullYear() + 1) {
+      throw new Error(`El año debe estar entre 1900 y ${new Date().getFullYear() + 1}`);
+    }
+
+    // 🔍 Validar duplicados (chassis)
+    if (chassis) {
+      const existe = await prisma.vehiculos.findUnique({
+        where: { chassis }
+      });
+      if (existe) {
+        throw new Error(`Ya existe un vehículo con el chassis ${chassis}`);
+      }
+    }
+
+    // 🔍 Validar duplicados + formato (placa)
+    if (placa) {
+      const placaRegex = /^[A-Z0-9]{5,10}$/i;
+
+      if (!placaRegex.test(placa.replace(/[-\s]/g, ''))) {
+        throw new Error('Formato de placa inválido');
       }
 
-      if (!modelo || modelo.trim().length < 1) {
-        throw new Error('El modelo es requerido');
-      }
-
-      if (!anio || anio < 1900 || anio > new Date().getFullYear() + 1) {
-        throw new Error(`El año debe estar entre 1900 y ${new Date().getFullYear() + 1}`);
-      }
-
-      // ✅ Validar duplicados
-      if (chassis) {
-        const existe = await prisma.vehiculos.findUnique({ 
-          where: { chassis } 
-        });
-        if (existe) {
-          throw new Error(`Ya existe un vehículo con el chassis ${chassis}`);
-        }
-      }
-
-      if (placa) {
-        const placaRegex = /^[A-Z0-9]{5,10}$/i;
-        if (!placaRegex.test(placa.replace(/[-\s]/g, ''))) {
-          throw new Error('Formato de placa inválido');
-        }
-
-        const existe = await prisma.vehiculos.findUnique({ 
-          where: { placa } 
-        });
-        if (existe) {
-          throw new Error(`Ya existe un vehículo con la placa ${placa}`);
-        }
-      }
-
-      // ✅ Validar precio
-      if (precio && (isNaN(precio) || parseFloat(precio) < 0)) {
-        throw new Error('El precio debe ser un número positivo');
-      }
-
-      // ✅ Validar cliente si se proporciona
-      if (cliente_id) {
-        const cliente = await prisma.clientes.findUnique({
-          where: { id: parseInt(cliente_id) }
-        });
-        if (!cliente) {
-          throw new Error('El cliente especificado no existe');
-        }
-      }
-
-      const codigo = await this.generarCodigo();
-
-      const vehiculo = await prisma.vehiculos.create({
-        data: {
-          codigo,
-          tipo: tipo || 'motor',
-          marca: marca.trim(),
-          modelo: modelo.trim(),
-          anio: parseInt(anio),
-          color: color || null,
-          chassis: chassis || null,
-          placa: placa || null,
-          precio: precio ? parseFloat(precio) : null,
-          detalles: detalles || null,
-          estado: 'disponible',
-          ...(cliente_id && { 
-            clientes: { 
-              connect: { id: parseInt(cliente_id) } 
-            } 
-          })
-        },
-        include: {
-          clientes: {
-            select: { id: true, nombre: true, cedula: true }
-          }
-        }
+      const existe = await prisma.vehiculos.findUnique({
+        where: { placa }
       });
 
-      return {
-        success: true,
-        message: `Vehículo registrado exitosamente — ${codigo}`,
-        data: vehiculo
-      };
-    } catch (error) {
-      console.error('❌ Error en VehiculoService.create:', error.message);
-      throw error;
+      if (existe) {
+        throw new Error(`Ya existe un vehículo con la placa ${placa}`);
+      }
     }
-  },
+
+    // 💰 Validar precio
+    if (precio !== null && (isNaN(precio) || precio < 0)) {
+      throw new Error('El precio debe ser un número positivo');
+    }
+
+    // 👤 Validar cliente
+    if (cliente_id) {
+      const cliente = await prisma.clientes.findUnique({
+        where: { id: cliente_id }
+      });
+
+      if (!cliente) {
+        throw new Error('El cliente especificado no existe');
+      }
+    }
+
+    // 🔢 Generar código
+    const codigo = await this.generarCodigo();
+
+    // 🧾 Crear vehículo
+    const vehiculo = await prisma.vehiculos.create({
+      data: {
+        codigo,
+        tipo,
+        marca,
+        modelo,
+        anio,
+        color,
+        chassis,
+        placa,
+        precio,
+        detalles,
+        estado: 'disponible',
+        ...(cliente_id && {
+          clientes: {
+            connect: { id: cliente_id }
+          }
+        })
+      },
+      include: {
+        clientes: {
+          select: { id: true, nombre: true, cedula: true }
+        }
+      }
+    });
+
+    return {
+      success: true,
+      message: `Vehículo registrado exitosamente — ${codigo}`,
+      data: vehiculo
+    };
+
+  } catch (error) {
+    console.error('❌ Error REAL en VehiculoService.create:', error);
+
+    // 🔥 Manejo específico Prisma
+    if (error.code === 'P2002') {
+      const campo = error.meta?.target?.join(', ') || 'campo único';
+      throw new Error(`Ya existe un registro con el mismo ${campo}`);
+    }
+
+    throw error;
+  }
+}
 
   async update(id, data) {
     try {
