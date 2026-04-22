@@ -204,7 +204,7 @@ const VehiculoService = {
 
     throw error;
   }
-}
+},
 
   async update(id, data) {
     try {
