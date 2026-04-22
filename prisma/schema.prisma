@@ -59,6 +59,8 @@ model clientes {
   notificaciones  notificaciones[]
   prestamos       prestamos[]
   referencias     referencias[]
+
+  vehiculos vehiculos[]
 }
 
 model configuracion {
@@ -293,6 +295,39 @@ model usuarios {
   roles           roles             @relation(fields: [rol_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([rol_id])
+}
+
+model vehiculos {
+  id         Int              @id @default(autoincrement())
+  codigo     String           @unique @db.VarChar(20)
+  tipo       vehiculos_tipo   @default(motor)
+  marca      String           @db.VarChar(100)
+  modelo     String           @db.VarChar(100)
+  anio       Int
+  color      String?          @db.VarChar(50)
+  chassis    String?          @unique @db.VarChar(100)
+  placa      String?          @unique @db.VarChar(20)
+  precio     Decimal?         @db.Decimal(10, 2)
+  detalles   String?          @db.Text
+  estado     vehiculos_estado @default(disponible)
+  cliente_id Int?
+  created_at DateTime         @default(now())
+  updated_at DateTime         @updatedAt
+  clientes   clientes?        @relation(fields: [cliente_id], references: [id], onDelete: SetNull)
+}
+
+enum vehiculos_tipo {
+  motor
+  carro
+  camion
+  bicicleta
+  otro
+}
+
+enum vehiculos_estado {
+  disponible
+  vendido
+  en_proceso
 }
 
 enum activos_financiados_tipo {

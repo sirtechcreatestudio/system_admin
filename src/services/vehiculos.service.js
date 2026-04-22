@@ -79,7 +79,7 @@ const VehiculoService = {
     }
   },
 
-  async create(data) {
+async create(data) {
   try {
     // 🧼 Sanitizar datos
     const tipo = data.tipo || 'motor';
