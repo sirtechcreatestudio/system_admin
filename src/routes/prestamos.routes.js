@@ -4,7 +4,75 @@ const prisma = require('../config/prisma');
 
 router.use(authMiddleware);
 
-function calcularCuota(monto, interesAnual, plazoMeses) {
+// ============================================================
+// FUNCIONES DE CÁLCULO POR FRECUENCIA
+// ============================================================
+
+/**
+ * Convierte el plazo a meses equivalentes para guardar en BD
+ */
+function plazoEnMeses(plazo, frecuencia) {
+  switch (frecuencia) {
+    case 'diario': return plazo / 30;
+    case 'semanal': return plazo / 4;
+    case 'quincenal': return plazo / 2;
+    default: return plazo; // mensual
+  }
+}
+
+/**
+ * Calcula la tasa de interés por período según la frecuencia
+ */
+function tasaPorPeriodo(interesAnual, frecuencia) {
+  const anual = interesAnual / 100;
+  switch (frecuencia) {
+    case 'diario': return anual / 365;
+    case 'semanal': return anual / 52;
+    case 'quincenal': return anual / 24;
+    default: return anual / 12; // mensual
+  }
+}
+
+/**
+ * Calcula la cuota por período (fórmula francesa)
+ */
+function calcularCuotaPorPeriodo(monto, tasaPeriodo, periodos) {
+  if (!monto || !tasaPeriodo || !periodos || monto <= 0 || periodos <= 0) return 0;
+  if (tasaPeriodo === 0) return Math.round((monto / periodos) * 100) / 100;
+  
+  const factor = Math.pow(1 + tasaPeriodo, periodos);
+  const cuota = monto * (tasaPeriodo * factor) / (factor - 1);
+  return Math.round(cuota * 100) / 100;
+}
+
+/**
+ * Calcula la siguiente fecha de vencimiento según la frecuencia
+ */
+function calcularSiguienteFecha(fechaBase, numeroPeriodo, frecuencia) {
+  const fecha = new Date(fechaBase);
+  
+  switch (frecuencia) {
+    case 'diario':
+      fecha.setDate(fecha.getDate() + numeroPeriodo);
+      break;
+    case 'semanal':
+      fecha.setDate(fecha.getDate() + (numeroPeriodo * 7));
+      break;
+    case 'quincenal':
+      fecha.setDate(fecha.getDate() + (numeroPeriodo * 15));
+      break;
+    default: // mensual
+      fecha.setMonth(fecha.getMonth() + numeroPeriodo);
+      break;
+  }
+  
+  return fecha;
+}
+
+/**
+ * Calcula la cuota mensual equivalente para mostrar en el listado
+ */
+function calcularCuotaMensual(monto, interesAnual, plazoMeses) {
   if (!monto || !interesAnual || !plazoMeses || monto <= 0 || interesAnual <= 0 || plazoMeses <= 0) {
     return 0;
   }
@@ -39,9 +107,12 @@ router.get('/', async (req, res) => {
       monto: Number(p.monto),
       interes: Number(p.interes),
       plazo: p.plazo,
+      plazo_original: p.plazo_original,
+      frecuencia_pago: p.frecuencia_pago,
       estado: p.estado,
       fecha_inicio: p.fecha_inicio,
-      cuota_mensual: calcularCuota(Number(p.monto), Number(p.interes), p.plazo)
+      saldo_actual: Number(p.saldo_actual),
+      cuota_mensual: calcularCuotaMensual(Number(p.monto), Number(p.interes), p.plazo)
     }));
 
     res.json({ success: true, data: prestamosFormateados });
@@ -81,30 +152,18 @@ router.get('/:id', async (req, res) => {
       return res.status(404).json({ success: false, message: 'Préstamo no encontrado' });
     }
 
-    const tasaMensual = Number(prestamo.interes) / 100 / 12;
-    const plazo = prestamo.plazo;
-    const monto = Number(prestamo.monto);
-    let cuotaMensual = 0;
-    let saldo = monto;
+    const tasaPeriodo = tasaPorPeriodo(Number(prestamo.interes), prestamo.frecuencia_pago || 'mensual');
+    const periodos = prestamo.plazo_original || prestamo.plazo;
+    let cuotaPeriodo = 0;
+    let saldo = Number(prestamo.monto);
     
-    if (monto > 0 && tasaMensual > 0 && plazo > 0) {
-      cuotaMensual = monto * (tasaMensual * Math.pow(1 + tasaMensual, plazo)) / (Math.pow(1 + tasaMensual, plazo) - 1);
-      cuotaMensual = Math.round(cuotaMensual * 100) / 100;
+    if (saldo > 0 && tasaPeriodo > 0 && periodos > 0) {
+      const factor = Math.pow(1 + tasaPeriodo, periodos);
+      cuotaPeriodo = saldo * (tasaPeriodo * factor) / (factor - 1);
+      cuotaPeriodo = Math.round(cuotaPeriodo * 100) / 100;
     }
 
-    const cuotasConAmortizacion = prestamo.cuotas.map((cuota, index) => {
-      const i = index + 1;
-      let capital = 0;
-      let interesCuota = 0;
-      let saldoRestante = 0;
-      
-      if (cuotaMensual > 0) {
-        interesCuota = saldo * tasaMensual;
-        capital = cuotaMensual - interesCuota;
-        saldoRestante = Math.max(saldo - capital, 0);
-        saldo = saldoRestante;
-      }
-      
+    const cuotasConAmortizacion = prestamo.cuotas.map((cuota) => {
       return {
         id: cuota.id,
         numero: cuota.numero,
@@ -112,9 +171,7 @@ router.get('/:id', async (req, res) => {
         fecha_vencimiento: cuota.fecha_vencimiento,
         fecha_pago: cuota.fecha_pago,
         estado: cuota.estado,
-        capital: Math.round(capital * 100) / 100,
-        interes: Math.round(interesCuota * 100) / 100,
-        saldo_restante: Math.round(saldoRestante * 100) / 100
+        monto_pagado: cuota.monto_pagado ? Number(cuota.monto_pagado) : null
       };
     });
 
@@ -128,12 +185,15 @@ router.get('/:id', async (req, res) => {
         email: prestamo.clientes.email,
         direccion: prestamo.clientes.direccion
       } : null,
-      monto: monto,
+      monto: Number(prestamo.monto),
       interes: Number(prestamo.interes),
       plazo: prestamo.plazo,
+      plazo_original: prestamo.plazo_original,
+      frecuencia_pago: prestamo.frecuencia_pago,
       estado: prestamo.estado,
       fecha_inicio: prestamo.fecha_inicio,
-      cuota_mensual: cuotaMensual,
+      saldo_actual: Number(prestamo.saldo_actual),
+      cuota_por_periodo: cuotaPeriodo,
       cuotas: cuotasConAmortizacion
     };
 
@@ -145,12 +205,22 @@ router.get('/:id', async (req, res) => {
 });
 
 // ============================================================
-// CREAR PRÉSTAMO
+// CREAR PRÉSTAMO (CON FRECUENCIA DE PAGO)
 // ============================================================
 router.post('/', async (req, res) => {
   try {
-    const { cliente_id, monto, interes, plazo, tipo_prestamo_id, plan_pago_id, fecha_inicio } = req.body;
+    const {
+      cliente_id,
+      monto,
+      interes,
+      plazo,
+      frecuencia_pago,
+      tipo_prestamo_id,
+      plan_pago_id,
+      fecha_inicio
+    } = req.body;
 
+    // Validaciones
     if (!cliente_id || !monto || !interes || !plazo) {
       return res.status(400).json({
         success: false,
@@ -163,75 +233,121 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Cliente no encontrado' });
     }
 
-    // Calcular cuota mensual
+    // Parámetros del préstamo
     const montoN = parseFloat(monto);
     const interesN = parseFloat(interes);
-    const plazoN = parseInt(plazo);
-    const cuotaMensual = calcularCuota(montoN, interesN, plazoN);
+    const plazoN = parseInt(plazo); // número de períodos
+    const frecuencia = frecuencia_pago || 'mensual';
+    const fechaInicio = fecha_inicio ? new Date(fecha_inicio) : new Date();
+
+    // Validar frecuencia válida
+    const frecuenciasValidas = ['diario', 'semanal', 'quincenal', 'mensual'];
+    if (!frecuenciasValidas.includes(frecuencia)) {
+      return res.status(400).json({
+        success: false,
+        message: `Frecuencia inválida. Debe ser: ${frecuenciasValidas.join(', ')}`
+      });
+    }
+
+    // Calcular tasa por período y cuota por período
+    const tasaPeriodo = tasaPorPeriodo(interesN, frecuencia);
+    const cuotaPeriodo = calcularCuotaPorPeriodo(montoN, tasaPeriodo, plazoN);
+    
+    if (cuotaPeriodo === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Error al calcular la cuota. Verifique los datos ingresados.'
+      });
+    }
+
+    // Calcular plazo equivalente en meses para guardar en BD
+    const plazoMesesEquiv = plazoEnMeses(plazoN, frecuencia);
 
     const prestamo = await prisma.$transaction(async (tx) => {
-      // 1. Crear préstamo — usar connect para relaciones, no IDs directos
+      // 1. Crear el préstamo
       const createData = {
-        clientes:    { connect: { id: parseInt(cliente_id) } },
-        monto:       montoN,
-        interes:     interesN,
-        plazo:       plazoN,
-        estado:      'pendiente',
-        fecha_inicio: fecha_inicio ? new Date(fecha_inicio) : new Date()
+        clientes: { connect: { id: parseInt(cliente_id) } },
+        monto: montoN,
+        interes: interesN,
+        plazo: Math.round(plazoMesesEquiv * 100) / 100, // plazo en meses (para compatibilidad)
+        plazo_original: plazoN, // plazo original en la unidad de la frecuencia
+        frecuencia_pago: frecuencia,
+        saldo_actual: montoN,
+        estado: 'pendiente',
+        fecha_inicio: fechaInicio
       };
 
-      // Conectar tipo_prestamo solo si se envió un ID válido
+      // Conectar relaciones opcionales
       if (tipo_prestamo_id && parseInt(tipo_prestamo_id) > 0) {
         createData.tipos_prestamo = { connect: { id: parseInt(tipo_prestamo_id) } };
       }
-      // Conectar plan_pago solo si se envió un ID válido
       if (plan_pago_id && parseInt(plan_pago_id) > 0) {
         createData.planes_pago = { connect: { id: parseInt(plan_pago_id) } };
       }
 
-      const p = await tx.prestamos.create({ data: createData });
+      const nuevoPrestamo = await tx.prestamos.create({ data: createData });
 
-      // 2. Generar cuotas + tabla de amortización
-      let saldo = montoN;
-      const tasaMensual = interesN / 100 / 12;
+      // 2. Generar las cuotas según la frecuencia
+      let saldoRestante = montoN;
 
       for (let i = 1; i <= plazoN; i++) {
-        const interesCuota = saldo * tasaMensual;
-        const capital = cuotaMensual - interesCuota;
-        saldo = Math.max(saldo - capital, 0);
+        // Calcular interés y capital de esta cuota
+        const interesCuota = Math.round(saldoRestante * tasaPeriodo * 100) / 100;
+        let capitalCuota = cuotaPeriodo - interesCuota;
+        
+        // Para la última cuota, ajustar el capital para que saldo quede en 0
+        if (i === plazoN) {
+          capitalCuota = saldoRestante;
+        } else if (capitalCuota < 0) {
+          capitalCuota = 0;
+        }
+        
+        // Actualizar saldo restante
+        saldoRestante = Math.round((saldoRestante - capitalCuota) * 100) / 100;
+        if (saldoRestante < 0) saldoRestante = 0;
 
-        const fechaVenc = new Date(p.fecha_inicio);
-        fechaVenc.setMonth(fechaVenc.getMonth() + i);
+        // Calcular fecha de vencimiento
+        const fechaVencimiento = calcularSiguienteFecha(fechaInicio, i, frecuencia);
 
-        // Cuota
+        // Crear la cuota
         await tx.cuotas.create({
           data: {
-            prestamo_id:       p.id,
-            numero:            i,
-            monto:             cuotaMensual,
-            fecha_vencimiento: fechaVenc,
-            estado:            'pendiente'
+            prestamo_id: nuevoPrestamo.id,
+            numero: i,
+            monto: cuotaPeriodo,
+            fecha_vencimiento: fechaVencimiento,
+            estado: 'pendiente'
           }
         });
 
-        // Amortización — solo campos que existen en el schema (sin cuota_id)
+        // Crear registro de amortización
         await tx.amortizacion.create({
           data: {
-            prestamo_id:    p.id,
-            numero_cuota:   i,
-            capital:        Math.round(capital * 100) / 100,
-            interes:        Math.round(interesCuota * 100) / 100,
-            saldo_restante: Math.round(saldo * 100) / 100,
-            fecha_pago:     fechaVenc,
-            estado:         'pendiente'
+            prestamo_id: nuevoPrestamo.id,
+            numero_cuota: i,
+            capital: Math.round(capitalCuota * 100) / 100,
+            interes: interesCuota,
+            saldo_restante: saldoRestante,
+            fecha_pago: fechaVencimiento,
+            estado: 'pendiente'
           }
         });
       }
 
-      return p;
+      // Actualizar el saldo_actual final (debería ser 0 si todo está bien)
+      await tx.prestamos.update({
+        where: { id: nuevoPrestamo.id },
+        data: { saldo_actual: saldoRestante }
+      });
+
+      return nuevoPrestamo;
     });
 
-    res.status(201).json({ success: true, message: 'Préstamo creado exitosamente', data: prestamo });
+    res.status(201).json({
+      success: true,
+      message: `Préstamo creado exitosamente con frecuencia ${frecuencia}`,
+      data: prestamo
+    });
   } catch (error) {
     console.error('Error al crear préstamo:', error);
     res.status(500).json({ success: false, message: error.message });
@@ -239,21 +355,22 @@ router.post('/', async (req, res) => {
 });
 
 // ============================================================
-// ACTUALIZAR PRÉSTAMO (datos generales)
+// ACTUALIZAR PRÉSTAMO
 // ============================================================
 router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { estado, monto, interes, plazo } = req.body;
 
+    const updateData = {};
+    if (estado !== undefined) updateData.estado = estado;
+    if (monto !== undefined) updateData.monto = parseFloat(monto);
+    if (interes !== undefined) updateData.interes = parseFloat(interes);
+    if (plazo !== undefined) updateData.plazo = parseInt(plazo);
+
     const prestamo = await prisma.prestamos.update({
       where: { id: parseInt(id) },
-      data: {
-        estado,
-        monto: monto ? parseFloat(monto) : undefined,
-        interes: interes ? parseFloat(interes) : undefined,
-        plazo: plazo ? parseInt(plazo) : undefined
-      }
+      data: updateData
     });
 
     res.json({ success: true, data: prestamo });
@@ -266,17 +383,20 @@ router.put('/:id', async (req, res) => {
 // ============================================================
 // REGISTRAR PAGO DE UNA CUOTA
 // ============================================================
-// Registrar pago de una cuota
 router.patch('/:id/cuotas/:cuotaId/pagar', async (req, res) => {
   try {
     const prestamoId = parseInt(req.params.id);
     const cuotaId = parseInt(req.params.cuotaId);
     const { fecha_pago, monto_pagado, notas } = req.body;
 
+    // Obtener la cuota con el préstamo relacionado
     const cuota = await prisma.cuotas.findFirst({
       where: {
         id: cuotaId,
         prestamo_id: prestamoId
+      },
+      include: {
+        prestamos: true
       }
     });
 
@@ -289,20 +409,45 @@ router.patch('/:id/cuotas/:cuotaId/pagar', async (req, res) => {
     }
 
     const fechaPago = fecha_pago ? new Date(fecha_pago) : new Date();
-    const montoPagado = monto_pagado || cuota.monto;
+    const montoPagado = monto_pagado ? parseFloat(monto_pagado) : cuota.monto;
+
+    // Validar que el monto pagado no sea mayor al de la cuota
+    if (montoPagado > cuota.monto) {
+      return res.status(400).json({
+        success: false,
+        message: `El monto pagado (${montoPagado}) no puede ser mayor al de la cuota (${cuota.monto})`
+      });
+    }
 
     // Actualizar la cuota
     await prisma.cuotas.update({
       where: { id: cuotaId },
       data: {
-        estado: 'pagado',
+        estado: montoPagado === cuota.monto ? 'pagado' : 'parcial',
         fecha_pago: fechaPago,
-        monto_pagado: parseFloat(montoPagado)
+        monto_pagado: montoPagado
       }
     });
 
-    // Verificar que el usuario del token exista en BD
-    // Si no existe (usuario eliminado, token viejo) usar el primer usuario activo
+    // Actualizar amortización
+    const amortizacion = await prisma.amortizacion.findFirst({
+      where: {
+        prestamo_id: prestamoId,
+        numero_cuota: cuota.numero
+      }
+    });
+
+    if (amortizacion) {
+      await prisma.amortizacion.update({
+        where: { id: amortizacion.id },
+        data: {
+          estado: montoPagado === cuota.monto ? 'pagado' : 'parcial',
+          fecha_pago: fechaPago
+        }
+      });
+    }
+
+    // Verificar usuario para registrar el pago
     let usuarioId = req.user?.id;
     const usuarioExiste = usuarioId
       ? await prisma.usuarios.findUnique({ where: { id: usuarioId }, select: { id: true } })
@@ -319,23 +464,43 @@ router.patch('/:id/cuotas/:cuotaId/pagar', async (req, res) => {
       usuarioId = fallback.id;
     }
 
+    // Registrar el pago
     await prisma.pagos.create({
       data: {
-        prestamo:    { connect: { id: prestamoId } },
-        cuota:       { connect: { id: cuotaId } },
-        monto:       parseFloat(montoPagado),
-        fecha_pago:  fechaPago,
+        prestamo: { connect: { id: prestamoId } },
+        cuota: { connect: { id: cuotaId } },
+        monto: montoPagado,
+        fecha_pago: fechaPago,
         metodo_pago: 'efectivo',
-        usuario:     { connect: { id: usuarioId } },
-        notas:       notas || null
+        usuario: { connect: { id: usuarioId } },
+        notas: notas || null
       }
+    });
+
+    // Actualizar saldo actual del préstamo
+    const cuotasPagadas = await prisma.cuotas.aggregate({
+      where: {
+        prestamo_id: prestamoId,
+        estado: { in: ['pagado', 'parcial'] }
+      },
+      _sum: {
+        monto_pagado: true
+      }
+    });
+
+    const totalPagado = cuotasPagadas._sum.monto_pagado || 0;
+    const nuevoSaldo = cuota.prestamos.monto - totalPagado;
+
+    await prisma.prestamos.update({
+      where: { id: prestamoId },
+      data: { saldo_actual: nuevoSaldo > 0 ? nuevoSaldo : 0 }
     });
 
     // Verificar si todas las cuotas están pagadas
     const cuotasPendientes = await prisma.cuotas.count({
       where: {
         prestamo_id: prestamoId,
-        estado: 'pendiente'
+        estado: { not: 'pagado' }
       }
     });
 
@@ -352,6 +517,7 @@ router.patch('/:id/cuotas/:cuotaId/pagar', async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 });
+
 // ============================================================
 // ACTUALIZAR ESTADO DE UN PRÉSTAMO
 // ============================================================
