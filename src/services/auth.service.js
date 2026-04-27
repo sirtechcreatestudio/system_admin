@@ -1,4 +1,8 @@
-const prisma = require('../config/database');
+// src/services/auth.service.js
+// CORRECCIÓN: importaba desde '../config/database' en vez de '../config/prisma'
+// Eso causa que el servicio use una instancia diferente (o rota) de Prisma.
+
+const prisma = require('../config/prisma');  // ← CORREGIDO
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 
@@ -6,19 +10,11 @@ const JWT_SECRET = process.env.JWT_SECRET || 'default_secret_change_this';
 
 const authService = {
   async register({ nombre, email, password, rol_id }) {
-    // Verificar si el email ya existe
-    const existingUser = await prisma.usuarios.findUnique({
-      where: { email }
-    });
+    const existingUser = await prisma.usuarios.findUnique({ where: { email } });
+    if (existingUser) throw new Error('El email ya está registrado');
 
-    if (existingUser) {
-      throw new Error('El email ya está registrado');
-    }
-
-    // Encriptar contraseña
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Crear usuario
     const newUser = await prisma.usuarios.create({
       data: {
         nombre,
@@ -28,15 +24,10 @@ const authService = {
         estado: 'activo'
       },
       include: {
-        roles: {
-          select: {
-            nombre: true
-          }
-        }
+        roles: { select: { nombre: true } }
       }
     });
 
-    // Generar token
     const token = jwt.sign(
       { id: newUser.id, email: newUser.email, rol_id: newUser.rol_id },
       JWT_SECRET,
@@ -48,60 +39,42 @@ const authService = {
       message: 'Usuario registrado exitosamente',
       token,
       user: {
-        id: newUser.id,
-        nombre: newUser.nombre,
-        email: newUser.email,
-        rol_id: newUser.rol_id,
-        rol: newUser.roles?.nombre,
-        estado: newUser.estado
+        id:      newUser.id,
+        nombre:  newUser.nombre,
+        email:   newUser.email,
+        rol_id:  newUser.rol_id,
+        rol:     newUser.roles?.nombre,
+        estado:  newUser.estado
       }
     };
   },
 
   async login(email, password) {
-    // Buscar usuario por email
     const usuario = await prisma.usuarios.findUnique({
       where: { email },
       include: {
         roles: {
           include: {
             rol_permisos: {
-              include: {
-                permisos: true
-              }
+              include: { permisos: true }
             }
           }
         }
       }
     });
 
-    if (!usuario) {
-      throw new Error('Credenciales inválidas');
-    }
+    if (!usuario) throw new Error('Credenciales inválidas');
+    if (usuario.estado !== 'activo') throw new Error('Usuario inactivo. Contacte al administrador.');
 
-    // Verificar estado del usuario
-    if (usuario.estado !== 'activo') {
-      throw new Error('Usuario inactivo. Contacte al administrador.');
-    }
-
-    // Verificar contraseña
     const isValidPassword = await bcrypt.compare(password, usuario.password);
-    if (!isValidPassword) {
-      throw new Error('Credenciales inválidas');
-    }
+    if (!isValidPassword) throw new Error('Credenciales inválidas');
 
-    // Generar token
     const token = jwt.sign(
-      { 
-        id: usuario.id, 
-        email: usuario.email, 
-        rol_id: usuario.rol_id 
-      },
+      { id: usuario.id, email: usuario.email, rol_id: usuario.rol_id },
       JWT_SECRET,
       { expiresIn: '8h' }
     );
 
-    // Obtener lista de permisos
     const permisos = usuario.roles?.rol_permisos?.map(rp => rp.permisos.nombre) || [];
 
     return {
@@ -109,13 +82,13 @@ const authService = {
       message: 'Login exitoso',
       token,
       user: {
-        id: usuario.id,
-        nombre: usuario.nombre,
-        email: usuario.email,
-        rol_id: usuario.rol_id,
-        rol: usuario.roles?.nombre,
-        estado: usuario.estado,
-        permisos: permisos
+        id:       usuario.id,
+        nombre:   usuario.nombre,
+        email:    usuario.email,
+        rol_id:   usuario.rol_id,
+        rol:      usuario.roles?.nombre,
+        estado:   usuario.estado,
+        permisos
       }
     };
   },
@@ -127,26 +100,19 @@ const authService = {
         roles: {
           include: {
             rol_permisos: {
-              include: {
-                permisos: true
-              }
+              include: { permisos: true }
             }
           }
         }
       }
     });
 
-    if (!usuario) {
-      throw new Error('Usuario no encontrado');
-    }
+    if (!usuario) throw new Error('Usuario no encontrado');
 
     const permisos = usuario.roles?.rol_permisos?.map(rp => rp.permisos.nombre) || [];
     const { password, ...usuarioSinPassword } = usuario;
 
-    return {
-      ...usuarioSinPassword,
-      permisos
-    };
+    return { ...usuarioSinPassword, permisos };
   }
 };
 

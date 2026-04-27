@@ -1,17 +1,22 @@
 // src/services/amortizacion.service.js
-// Corregido: sin interes_mensual, sin sistema_calculo, sin created_by
-// Solo usa campos que existen en el schema Prisma real
+// CORRECCIÓN: registrarPago ya NO marca la cuota como "pagado" por recibir
+// cualquier monto. Solo la marca pagada si el monto cubre la cuota completa.
+// El saldo_actual del préstamo se reduce solo por el capital abonado.
+
 const prisma = require('../config/prisma');
 
 class AmortizacionService {
-  // Calcular interés del período según frecuencia
-  calcularInteresPeriodo(capital, interesAnual, frecuencia = 'mensual') {
-    const tasaMensual = interesAnual / 100 / 12;
-    if (frecuencia === 'quincenal') return (capital * tasaMensual) / 2;
-    return capital * tasaMensual;
+
+  _tasaPorFrecuencia(interesAnual, frecuencia = 'mensual') {
+    const anual = interesAnual / 100;
+    switch (frecuencia) {
+      case 'diaria':    return anual / 365;
+      case 'semanal':   return anual / 52;
+      case 'quincenal': return anual / 24;
+      default:          return anual / 12;
+    }
   }
 
-  // Obtener tabla de amortización de un préstamo
   async obtenerTabla(prestamoId) {
     const prestamo = await prisma.prestamos.findUnique({
       where: { id: parseInt(prestamoId) },
@@ -21,65 +26,99 @@ class AmortizacionService {
     return prestamo.amortizacion;
   }
 
-  // Registrar pago aplicando a interés primero, luego capital
+  /**
+   * Registra un pago directo sobre un préstamo.
+   * - La cuota solo se marca "pagado" si se cubrió su monto total.
+   * - El saldo del préstamo baja únicamente por el capital efectivamente abonado.
+   * - Si saldo llega a 0, el préstamo se marca como 'pagado'.
+   */
   async registrarPago(prestamoId, montoPagado, fechaPago, metodoPago, userId) {
     const prestamo = await prisma.prestamos.findUnique({
       where: { id: parseInt(prestamoId) },
       include: {
-        pagos: { orderBy: { fecha_pago: 'desc' }, take: 1 },
-        cuotas: { where: { estado: { in: ['pendiente', 'atrasado'] } }, orderBy: { numero: 'asc' } }
+        cuotas: {
+          where: { estado: { in: ['pendiente', 'atrasado'] } },
+          orderBy: { numero: 'asc' }
+        }
       }
     });
     if (!prestamo) throw new Error('Préstamo no encontrado');
+    if (prestamo.estado === 'pagado') throw new Error('Este préstamo ya está completamente pagado');
 
     const montoN = parseFloat(montoPagado);
-    const capitalActual = Number(prestamo.monto);
-    const tasaMensual = Number(prestamo.interes) / 100 / 12;
-    const interesPeriodo = capitalActual * tasaMensual;
+    const saldoActual = Number(prestamo.saldo_actual ?? prestamo.monto);
+    const frecuencia  = prestamo.frecuencia_pago || 'mensual';
+    const tasa        = this._tasaPorFrecuencia(Number(prestamo.interes), frecuencia);
 
-    let abonoCapital = 0;
-    let interesPagado = interesPeriodo;
-    let saldoRestante = capitalActual;
+    // Calcular interés del período sobre el saldo actual real
+    const interesPeriodo  = parseFloat((saldoActual * tasa).toFixed(2));
+    const abonoCapital    = Math.max(0, parseFloat((montoN - interesPeriodo).toFixed(2)));
+    const interesPagado   = Math.min(montoN, interesPeriodo);
+    const nuevoSaldo      = Math.max(0, parseFloat((saldoActual - abonoCapital).toFixed(2)));
 
-    if (montoN >= interesPeriodo) {
-      abonoCapital  = montoN - interesPeriodo;
-      saldoRestante = Math.max(0, capitalActual - abonoCapital);
-      interesPagado = interesPeriodo;
-    } else {
-      interesPagado = montoN;
-      saldoRestante = capitalActual;
-    }
-
-    // Buscar la cuota pendiente más antigua para asociar el pago
     const cuota = prestamo.cuotas[0];
     if (!cuota) throw new Error('No hay cuotas pendientes');
 
-    const pago = await prisma.pagos.create({
-      data: {
-        prestamo: { connect: { id: parseInt(prestamoId) } },
-        cuota:    { connect: { id: cuota.id } },
-        monto:       montoN,
-        fecha_pago:  new Date(fechaPago),
-        metodo_pago: metodoPago || 'efectivo',
-        usuario:     { connect: { id: parseInt(userId) } }
+    // Acumular monto_pagado de la cuota
+    const montoPagadoAcumulado = parseFloat(
+      ((Number(cuota.monto_pagado) || 0) + montoN).toFixed(2)
+    );
+    const cuotaCompleta = montoPagadoAcumulado >= Number(cuota.monto);
+
+    return await prisma.$transaction(async (tx) => {
+      // Registrar pago
+      const pago = await tx.pagos.create({
+        data: {
+          prestamo: { connect: { id: parseInt(prestamoId) } },
+          cuota:    { connect: { id: cuota.id } },
+          monto:       montoN,
+          fecha_pago:  new Date(fechaPago),
+          metodo_pago: metodoPago || 'efectivo',
+          usuario:     { connect: { id: parseInt(userId) } }
+        }
+      });
+
+      // Actualizar cuota — pagada solo si monto cubierto completamente
+      await tx.cuotas.update({
+        where: { id: cuota.id },
+        data: {
+          monto_pagado: montoPagadoAcumulado,
+          estado:      cuotaCompleta ? 'pagado' : cuota.estado,
+          fecha_pago:  cuotaCompleta ? new Date(fechaPago) : undefined
+        }
+      });
+
+      // Actualizar amortización si cuota completa
+      if (cuotaCompleta) {
+        await tx.amortizacion.updateMany({
+          where: { prestamo_id: parseInt(prestamoId), numero_cuota: cuota.numero },
+          data: { estado: 'pagado', fecha_pago: new Date(fechaPago) }
+        });
       }
+
+      // Actualizar saldo real del préstamo
+      await tx.prestamos.update({
+        where: { id: parseInt(prestamoId) },
+        data: {
+          saldo_actual: nuevoSaldo,
+          estado: nuevoSaldo <= 0 ? 'pagado' : prestamo.estado
+        }
+      });
+
+      return {
+        success: true,
+        data: {
+          pago,
+          saldo_anterior:  saldoActual,
+          interes_periodo: interesPeriodo,
+          interes_pagado:  interesPagado,
+          abono_capital:   abonoCapital,
+          saldo_restante:  nuevoSaldo,
+          cuota_completada: cuotaCompleta,
+          prestamo_saldado: nuevoSaldo <= 0
+        }
+      };
     });
-
-    // Marcar cuota como pagada
-    await prisma.cuotas.update({
-      where: { id: cuota.id },
-      data: { estado: 'pagado', fecha_pago: new Date(fechaPago), monto_pagado: montoN }
-    });
-
-    // Cerrar préstamo si no quedan cuotas pendientes
-    if (saldoRestante <= 0) {
-      await prisma.prestamos.update({ where: { id: parseInt(prestamoId) }, data: { estado: 'pagado' } });
-    }
-
-    return {
-      success: true,
-      data: { pago, capital_anterior: capitalActual, interes_periodo: interesPeriodo, abono_capital: abonoCapital, saldo_restante: saldoRestante }
-    };
   }
 }
 
