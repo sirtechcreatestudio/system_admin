@@ -5,7 +5,7 @@ const prisma = require('../config/prisma');
 router.use(authMiddleware);
 
 // ============================================================
-// FUNCIONES DE CÁLCULO POR FRECUENCIA
+// FUNCIONES DE CÁLCULO POR FRECUENCIA (con interés MENSUAL)
 // ============================================================
 
 /**
@@ -22,14 +22,20 @@ function plazoEnMeses(plazo, frecuencia) {
 
 /**
  * Calcula la tasa de interés por período según la frecuencia
+ * PARTIENDO de una tasa MENSUAL
  */
-function tasaPorPeriodo(interesAnual, frecuencia) {
-  const anual = interesAnual / 100;
+function tasaPorPeriodo(interesMensual, frecuencia) {
+  const tasaMensual = interesMensual / 100; // Ej: 5% mensual = 0.05
+  
   switch (frecuencia) {
-    case 'diario': return anual / 365;
-    case 'semanal': return anual / 52;
-    case 'quincenal': return anual / 24;
-    default: return anual / 12; // mensual
+    case 'diario': 
+      return tasaMensual / 30;  // Tasa diaria desde tasa mensual
+    case 'semanal': 
+      return tasaMensual / 4;   // Tasa semanal desde tasa mensual
+    case 'quincenal': 
+      return tasaMensual / 2;   // Tasa quincenal desde tasa mensual
+    default: 
+      return tasaMensual;        // Tasa mensual
   }
 }
 
@@ -50,20 +56,30 @@ function calcularCuotaPorPeriodo(monto, tasaPeriodo, periodos) {
  */
 function calcularSiguienteFecha(fechaBase, numeroPeriodo, frecuencia) {
   const fecha = new Date(fechaBase);
+  let diasASumar = 0;
   
   switch (frecuencia) {
     case 'diario':
-      fecha.setDate(fecha.getDate() + numeroPeriodo);
+      diasASumar = numeroPeriodo;
       break;
     case 'semanal':
-      fecha.setDate(fecha.getDate() + (numeroPeriodo * 7));
+      diasASumar = numeroPeriodo * 7;
       break;
     case 'quincenal':
-      fecha.setDate(fecha.getDate() + (numeroPeriodo * 15));
+      diasASumar = numeroPeriodo * 15;
       break;
-    default: // mensual
+    default:
       fecha.setMonth(fecha.getMonth() + numeroPeriodo);
-      break;
+      return fecha;
+  }
+  
+  // Sumar días saltando domingos (día 0 = domingo)
+  let diasAgregados = 0;
+  while (diasAgregados < diasASumar) {
+    fecha.setDate(fecha.getDate() + 1);
+    if (fecha.getDay() !== 0) { // 0 = domingo
+      diasAgregados++;
+    }
   }
   
   return fecha;
@@ -72,11 +88,11 @@ function calcularSiguienteFecha(fechaBase, numeroPeriodo, frecuencia) {
 /**
  * Calcula la cuota mensual equivalente para mostrar en el listado
  */
-function calcularCuotaMensual(monto, interesAnual, plazoMeses) {
-  if (!monto || !interesAnual || !plazoMeses || monto <= 0 || interesAnual <= 0 || plazoMeses <= 0) {
+function calcularCuotaMensual(monto, interesMensual, plazoMeses) {
+  if (!monto || !interesMensual || !plazoMeses || monto <= 0 || interesMensual <= 0 || plazoMeses <= 0) {
     return 0;
   }
-  const tasaMensual = interesAnual / 100 / 12;
+  const tasaMensual = interesMensual / 100;
   const cuota = monto * (tasaMensual * Math.pow(1 + tasaMensual, plazoMeses)) / (Math.pow(1 + tasaMensual, plazoMeses) - 1);
   return Math.round(cuota * 100) / 100;
 }
@@ -235,7 +251,7 @@ router.post('/', async (req, res) => {
 
     // Parámetros del préstamo
     const montoN = parseFloat(monto);
-    const interesN = parseFloat(interes);
+    const interesMensual = parseFloat(interes); // Este es el interés MENSUAL (%)
     const plazoN = parseInt(plazo); // número de períodos
     const frecuencia = frecuencia_pago || 'mensual';
     const fechaInicio = fecha_inicio ? new Date(fecha_inicio) : new Date();
@@ -250,7 +266,7 @@ router.post('/', async (req, res) => {
     }
 
     // Calcular tasa por período y cuota por período
-    const tasaPeriodo = tasaPorPeriodo(interesN, frecuencia);
+    const tasaPeriodo = tasaPorPeriodo(interesMensual, frecuencia);
     const cuotaPeriodo = calcularCuotaPorPeriodo(montoN, tasaPeriodo, plazoN);
     
     if (cuotaPeriodo === 0) {
@@ -268,7 +284,7 @@ router.post('/', async (req, res) => {
       const createData = {
         clientes: { connect: { id: parseInt(cliente_id) } },
         monto: montoN,
-        interes: interesN,
+        interes: interesMensual, // Guardamos el interés MENSUAL
         plazo: Math.round(plazoMesesEquiv * 100) / 100, // plazo en meses (para compatibilidad)
         plazo_original: plazoN, // plazo original en la unidad de la frecuencia
         frecuencia_pago: frecuencia,
@@ -334,7 +350,7 @@ router.post('/', async (req, res) => {
         });
       }
 
-      // Actualizar el saldo_actual final (debería ser 0 si todo está bien)
+      // Actualizar el saldo_actual final
       await tx.prestamos.update({
         where: { id: nuevoPrestamo.id },
         data: { saldo_actual: saldoRestante }
@@ -389,7 +405,6 @@ router.patch('/:id/cuotas/:cuotaId/pagar', async (req, res) => {
     const cuotaId = parseInt(req.params.cuotaId);
     const { fecha_pago, monto_pagado, notas } = req.body;
 
-    // Obtener la cuota con el préstamo relacionado
     const cuota = await prisma.cuotas.findFirst({
       where: {
         id: cuotaId,
@@ -411,7 +426,6 @@ router.patch('/:id/cuotas/:cuotaId/pagar', async (req, res) => {
     const fechaPago = fecha_pago ? new Date(fecha_pago) : new Date();
     const montoPagado = monto_pagado ? parseFloat(monto_pagado) : cuota.monto;
 
-    // Validar que el monto pagado no sea mayor al de la cuota
     if (montoPagado > cuota.monto) {
       return res.status(400).json({
         success: false,
@@ -419,7 +433,6 @@ router.patch('/:id/cuotas/:cuotaId/pagar', async (req, res) => {
       });
     }
 
-    // Actualizar la cuota
     await prisma.cuotas.update({
       where: { id: cuotaId },
       data: {
@@ -429,7 +442,6 @@ router.patch('/:id/cuotas/:cuotaId/pagar', async (req, res) => {
       }
     });
 
-    // Actualizar amortización
     const amortizacion = await prisma.amortizacion.findFirst({
       where: {
         prestamo_id: prestamoId,
@@ -447,7 +459,6 @@ router.patch('/:id/cuotas/:cuotaId/pagar', async (req, res) => {
       });
     }
 
-    // Verificar usuario para registrar el pago
     let usuarioId = req.user?.id;
     const usuarioExiste = usuarioId
       ? await prisma.usuarios.findUnique({ where: { id: usuarioId }, select: { id: true } })
@@ -464,7 +475,6 @@ router.patch('/:id/cuotas/:cuotaId/pagar', async (req, res) => {
       usuarioId = fallback.id;
     }
 
-    // Registrar el pago
     await prisma.pagos.create({
       data: {
         prestamo: { connect: { id: prestamoId } },
@@ -477,7 +487,6 @@ router.patch('/:id/cuotas/:cuotaId/pagar', async (req, res) => {
       }
     });
 
-    // Actualizar saldo actual del préstamo
     const cuotasPagadas = await prisma.cuotas.aggregate({
       where: {
         prestamo_id: prestamoId,
@@ -496,7 +505,6 @@ router.patch('/:id/cuotas/:cuotaId/pagar', async (req, res) => {
       data: { saldo_actual: nuevoSaldo > 0 ? nuevoSaldo : 0 }
     });
 
-    // Verificar si todas las cuotas están pagadas
     const cuotasPendientes = await prisma.cuotas.count({
       where: {
         prestamo_id: prestamoId,
