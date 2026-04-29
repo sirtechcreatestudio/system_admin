@@ -219,6 +219,7 @@ model prestamos {
   monto               Decimal?              @db.Decimal(10, 2)
   interes             Decimal?              @db.Decimal(5, 2)
   plazo               Int?
+  plazo_original      Int? 
   estado              prestamos_estado?
   fecha_inicio        DateTime?             @db.Date
   created_at          DateTime?             @default(now())
