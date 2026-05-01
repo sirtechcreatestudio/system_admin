@@ -286,7 +286,7 @@ router.post('/', async (req, res) => {
         monto: montoN,
         interes: interesMensual, // Guardamos el interés MENSUAL
         plazo: Math.round(plazoMesesEquiv * 100) / 100, // plazo en meses (para compatibilidad)
-        plazo_original: plazoN, // plazo original en la unidad de la frecuencia
+        // plazo_original: plazoN, // plazo original en la unidad de la frecuencia
         frecuencia_pago: frecuencia,
         saldo_actual: montoN,
         estado: 'pendiente',
