@@ -226,135 +226,137 @@ const PrestamoController = {
     }
   },
 
-  // PATCH /:id/cuotas/:cuotaId/pagar - Registrar pago de una cuota
-  async registrarPago(req, res) {
-    try {
-      const prestamoId = parseInt(req.params.id);
-      const cuotaId = parseInt(req.params.cuotaId);
-      const { fecha_pago, monto_pagado, notas } = req.body;
+// PATCH /:id/cuotas/:cuotaId/pagar - Registrar pago de una cuota
+async registrarPago(req, res) {
+  try {
+    const prestamoId = parseInt(req.params.id);
+    const cuotaId = parseInt(req.params.cuotaId);
+    const { fecha_pago, monto_pagado, notas } = req.body;
 
-      const cuota = await prisma.cuotas.findFirst({
-        where: {
-          id: cuotaId,
-          prestamo_id: prestamoId
-        },
-        include: {
-          prestamo: true
+    // ✅ Obtener cuota con la relación prestamo (singular)
+    const cuota = await prisma.cuotas.findFirst({
+      where: {
+        id: cuotaId,
+        prestamo_id: prestamoId
+      },
+      include: {
+        prestamo: true  // ← Singular
+      }
+    });
+
+    if (!cuota) {
+      return res.status(404).json({ success: false, message: 'Cuota no encontrada' });
+    }
+
+    if (cuota.estado === 'pagado') {
+      return res.status(400).json({ success: false, message: 'Esta cuota ya fue pagada' });
+    }
+
+    const fechaPago = fecha_pago ? new Date(fecha_pago) : new Date();
+    const montoPagado = monto_pagado ? parseFloat(monto_pagado) : cuota.monto;
+
+    if (montoPagado > cuota.monto) {
+      return res.status(400).json({
+        success: false,
+        message: `El monto pagado (${montoPagado}) no puede ser mayor al de la cuota (${cuota.monto})`
+      });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.cuotas.update({
+        where: { id: cuotaId },
+        data: {
+          estado: montoPagado === cuota.monto ? 'pagado' : 'pendiente',
+          fecha_pago: fechaPago,
+          monto_pagado: montoPagado
         }
       });
 
-      if (!cuota) {
-        return res.status(404).json({ success: false, message: 'Cuota no encontrada' });
-      }
+      const amortizacion = await tx.amortizacion.findFirst({
+        where: {
+          prestamo_id: prestamoId,
+          numero_cuota: cuota.numero
+        }
+      });
 
-      if (cuota.estado === 'pagado') {
-        return res.status(400).json({ success: false, message: 'Esta cuota ya fue pagada' });
-      }
-
-      const fechaPago = fecha_pago ? new Date(fecha_pago) : new Date();
-      const montoPagado = monto_pagado ? parseFloat(monto_pagado) : cuota.monto;
-
-      if (montoPagado > cuota.monto) {
-        return res.status(400).json({
-          success: false,
-          message: `El monto pagado (${montoPagado}) no puede ser mayor al de la cuota (${cuota.monto})`
-        });
-      }
-
-      await prisma.$transaction(async (tx) => {
-        await tx.cuotas.update({
-          where: { id: cuotaId },
+      if (amortizacion) {
+        await tx.amortizacion.update({
+          where: { id: amortizacion.id },
           data: {
             estado: montoPagado === cuota.monto ? 'pagado' : 'pendiente',
-            fecha_pago: fechaPago,
-            monto_pagado: montoPagado
+            fecha_pago: fechaPago
           }
         });
+      }
 
-        const amortizacion = await tx.amortizacion.findFirst({
-          where: {
-            prestamo_id: prestamoId,
-            numero_cuota: cuota.numero
-          }
+      let usuarioId = req.user?.id;
+      const usuarioExiste = usuarioId
+        ? await tx.usuarios.findUnique({ where: { id: usuarioId }, select: { id: true } })
+        : null;
+
+      if (!usuarioExiste) {
+        const fallback = await tx.usuarios.findFirst({
+          where: { estado: 'activo' },
+          select: { id: true }
         });
-
-        if (amortizacion) {
-          await tx.amortizacion.update({
-            where: { id: amortizacion.id },
-            data: {
-              estado: montoPagado === cuota.monto ? 'pagado' : 'pendiente',
-              fecha_pago: fechaPago
-            }
-          });
+        if (!fallback) {
+          throw new Error('No hay usuarios activos en el sistema');
         }
+        usuarioId = fallback.id;
+      }
 
-        let usuarioId = req.user?.id;
-        const usuarioExiste = usuarioId
-          ? await tx.usuarios.findUnique({ where: { id: usuarioId }, select: { id: true } })
-          : null;
-
-        if (!usuarioExiste) {
-          const fallback = await tx.usuarios.findFirst({
-            where: { estado: 'activo' },
-            select: { id: true }
-          });
-          if (!fallback) {
-            throw new Error('No hay usuarios activos en el sistema');
-          }
-          usuarioId = fallback.id;
-        }
-
-        await tx.pagos.create({
-          data: {
-            prestamo: { connect: { id: prestamoId } },
-            cuota: { connect: { id: cuotaId } },
-            monto: montoPagado,
-            fecha_pago: fechaPago,
-            metodo_pago: 'efectivo',
-            usuario: { connect: { id: usuarioId } },
-            notas: notas || null
-          }
-        });
-
-        const cuotasPagadas = await tx.cuotas.aggregate({
-          where: {
-            prestamo_id: prestamoId,
-            estado: { in: ['pagado', 'parcial'] }
-          },
-          _sum: {
-            monto_pagado: true
-          }
-        });
-
-        const totalPagado = cuotasPagadas._sum.monto_pagado || 0;
-        const nuevoSaldo = cuota.prestamos.monto - totalPagado;
-
-        await tx.prestamos.update({
-          where: { id: prestamoId },
-          data: { saldo_actual: nuevoSaldo > 0 ? nuevoSaldo : 0 }
-        });
-
-        const cuotasPendientes = await tx.cuotas.count({
-          where: {
-            prestamo_id: prestamoId,
-            estado: { not: 'pagado' }
-          }
-        });
-
-        if (cuotasPendientes === 0) {
-          await tx.prestamos.update({
-            where: { id: prestamoId },
-            data: { estado: 'pagado' }
-          });
+      await tx.pagos.create({
+        data: {
+          prestamo: { connect: { id: prestamoId } },
+          cuota: { connect: { id: cuotaId } },
+          monto: montoPagado,
+          fecha_pago: fechaPago,
+          metodo_pago: 'efectivo',
+          usuario: { connect: { id: usuarioId } },
+          notas: notas || null
         }
       });
 
-      res.json({ success: true, message: 'Pago registrado exitosamente' });
-    } catch (error) {
-      console.error('Error registrando pago:', error);
-      res.status(500).json({ success: false, message: error.message });
-    }
+      const cuotasPagadas = await tx.cuotas.aggregate({
+        where: {
+          prestamo_id: prestamoId,
+          estado: { in: ['pagado', 'pendiente'] }  // ← Cambiado: 'parcial' ya no existe
+        },
+        _sum: {
+          monto_pagado: true
+        }
+      });
+
+      const totalPagado = cuotasPagadas._sum.monto_pagado || 0;
+      // ✅ Usar cuota.prestamo (singular) en lugar de cuota.prestamos
+      const nuevoSaldo = cuota.prestamo.monto - totalPagado;
+
+      await tx.prestamos.update({
+        where: { id: prestamoId },
+        data: { saldo_actual: nuevoSaldo > 0 ? nuevoSaldo : 0 }
+      });
+
+      const cuotasPendientes = await tx.cuotas.count({
+        where: {
+          prestamo_id: prestamoId,
+          estado: { not: 'pagado' }
+        }
+      });
+
+      if (cuotasPendientes === 0) {
+        await tx.prestamos.update({
+          where: { id: prestamoId },
+          data: { estado: 'pagado' }
+        });
+      }
+    });
+
+    res.json({ success: true, message: 'Pago registrado exitosamente' });
+  } catch (error) {
+    console.error('Error registrando pago:', error);
+    res.status(500).json({ success: false, message: error.message });
   }
+}
 };
 
 module.exports = PrestamoController;
