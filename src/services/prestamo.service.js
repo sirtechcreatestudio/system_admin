@@ -7,10 +7,14 @@ const prisma = require('../config/prisma');
 function tasaPorFrecuencia(interesMensual, frecuencia) {
   const tasaMensual = interesMensual / 100;
   switch (frecuencia) {
-    case 'diaria':    return tasaMensual / 30;
-    case 'semanal':   return tasaMensual / 4;
-    case 'quincenal': return tasaMensual / 2;
-    default:          return tasaMensual;
+    case 'diaria':    
+      return tasaMensual / 26;     // ✅ 26 días hábiles (coincide con UI)
+    case 'semanal':   
+      return tasaMensual / 4;
+    case 'quincenal': 
+      return tasaMensual / 2;
+    default:          
+      return tasaMensual;
   }
 }
 
@@ -25,10 +29,25 @@ function calcularCuotaPorPeriodo(monto, tasaPeriodo, periodos) {
 function sumarPeriodo(fecha, n, frecuencia) {
   const d = new Date(fecha);
   switch (frecuencia) {
-    case 'diaria':    d.setDate(d.getDate() + n); break;
-    case 'semanal':   d.setDate(d.getDate() + n * 7); break;
-    case 'quincenal': d.setDate(d.getDate() + n * 15); break;
-    default:          d.setMonth(d.getMonth() + n);
+    case 'diaria': {
+      // Saltar domingos (día 0 = domingo)
+      let diasAgregados = 0;
+      while (diasAgregados < n) {
+        d.setDate(d.getDate() + 1);
+        if (d.getDay() !== 0) {  // 0 = domingo
+          diasAgregados++;
+        }
+      }
+      break;
+    }
+    case 'semanal':
+      d.setDate(d.getDate() + n * 7);
+      break;
+    case 'quincenal':
+      d.setDate(d.getDate() + n * 15);
+      break;
+    default:
+      d.setMonth(d.getMonth() + n);
   }
   return d;
 }
@@ -40,7 +59,7 @@ function normalizarFrecuencia(frecuencia) {
 
 function plazoEnMeses(plazo, frecuencia) {
   switch (frecuencia) {
-    case 'diaria':    return plazo / 30;
+    case 'diaria':    return plazo / 30;  // Aproximación a meses
     case 'semanal':   return plazo / 4;
     case 'quincenal': return plazo / 2;
     default:          return plazo;
@@ -115,13 +134,21 @@ async function crearPrestamo(data) {
   const cuotaPeriodo = calcularCuotaPorPeriodo(montoN, tasaPeriodo, plazoN);
   const plazoMesesEquiv = plazoEnMeses(plazoN, frecNorm);
 
+  console.log('📊 Creando préstamo:', {
+    monto: montoN,
+    interesMensual,
+    frecuencia: frecNorm,
+    plazo: plazoN,
+    tasaPeriodo: tasaPeriodo * 100 + '%',
+    cuotaPeriodo
+  });
+
   return await prisma.$transaction(async (tx) => {
-    // Crear préstamo - SIN plazo_original (como en tu código original)
     const createData = {
       clientes: { connect: { id: parseInt(cliente_id) } },
       monto: montoN,
       interes: interesMensual,
-      plazo: plazoMesesEquiv,  // solo guardamos esto
+      plazo: plazoMesesEquiv,
       frecuencia_pago: frecNorm,
       estado: 'pendiente',
       fecha_inicio: fechaBase,
@@ -176,6 +203,8 @@ async function crearPrestamo(data) {
 
     await tx.cuotas.createMany({ data: cuotasData });
     await tx.amortizacion.createMany({ data: amortizacionData });
+
+    console.log(`✅ Generadas ${cuotasData.length} cuotas de RD$ ${cuotaPeriodo}`);
 
     return prestamo;
   });
