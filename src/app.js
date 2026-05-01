@@ -9,12 +9,11 @@
 const express    = require('express');
 const cors       = require('cors');
 const helmet     = require('helmet');
-const rateLimit  = require('express-rate-limit');
 const pinoHttp   = require('pino-http');
 const hpp        = require('hpp');                 // HTTP Parameter Pollution
 const mongoSanitize = require('express-mongo-sanitize'); // NoSQL injection
 const prisma     = require('./lib/prisma');
-
+const rateLimit = require('express-rate-limit');
 const app = express();
 
 // ============================================================
@@ -54,7 +53,7 @@ app.use(cors(corsOptions));
 
 // ✅ Responde explícitamente a TODOS los preflight ANTES del rate-limit
 // Chrome/Edge requieren OPTIONS exitoso antes de cualquier request con credenciales
-app.options('*', cors(corsOptions));
+app.options('/{*any}', cors(corsOptions));
 
 // ============================================================
 // 🛡️  HELMET — después de CORS, con políticas cross-origin relajadas
@@ -141,23 +140,23 @@ app.use(logger);
 
 // --- Global API ---
 const globalLimiter = rateLimit({
-  windowMs         : 15 * 60 * 1000, // 15 min
-  max              : 100,
-  standardHeaders  : true,            // RateLimit-* headers (RFC 6585)
-  legacyHeaders    : false,
-  message          : { success: false, message: 'Demasiadas solicitudes, intenta más tarde.' },
-  keyGenerator     : (req) => req.ip, // usa IP real gracias a trust proxy
-  skip             : (req) => req.method === 'OPTIONS', // no limita preflight
+  windowMs        : 15 * 60 * 1000,
+  max             : 100,
+  standardHeaders : true,
+  legacyHeaders   : false,
+  message         : { success: false, message: 'Demasiadas solicitudes, intenta más tarde.' },
+  skip            : (req) => req.method === 'OPTIONS',
+  // ✅ Sin keyGenerator — v8 maneja IPv6 automáticamente
 });
 
-// --- Login (protección fuerza bruta) ---
+// --- Login ---
 const loginLimiter = rateLimit({
-  windowMs        : 10 * 60 * 1000, // 10 min
+  windowMs        : 10 * 60 * 1000,
   max             : 5,
   standardHeaders : true,
   legacyHeaders   : false,
   message         : { success: false, message: 'Demasiados intentos de login. Espera 10 minutos.' },
-  keyGenerator    : (req) => req.ip,
+  // ✅ Sin keyGenerator
 });
 
 app.use('/api', globalLimiter);
