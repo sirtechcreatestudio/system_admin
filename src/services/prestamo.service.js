@@ -234,9 +234,10 @@ async function registrarPago(prestamoId, cuotaId, data) {
   const { fecha_pago, monto_pagado, notas, usuario_id } = data;
   const fechaPago = fecha_pago ? new Date(fecha_pago) : new Date();
 
+  // ✅ CORREGIDO: prestamo (singular) en lugar de prestamos
   const cuota = await prisma.cuotas.findFirst({
     where: { id: parseInt(cuotaId), prestamo_id: parseInt(prestamoId) },
-    include: { prestamos: true }
+    include: { prestamo: true }  // ← Cambiado
   });
 
   if (!cuota) throw new Error('Cuota no encontrada');
@@ -288,7 +289,8 @@ async function registrarPago(prestamoId, cuotaId, data) {
       _sum: { monto_pagado: true }
     });
 
-    const nuevoSaldo = cuota.prestamos.monto - (totalPagado._sum.monto_pagado || 0);
+    // ✅ CORREGIDO: cuota.prestamo (singular) en lugar de cuota.prestamos
+    const nuevoSaldo = cuota.prestamo.monto - (totalPagado._sum.monto_pagado || 0);
     await tx.prestamos.update({
       where: { id: parseInt(prestamoId) },
       data: { saldo_actual: nuevoSaldo > 0 ? nuevoSaldo : 0 }
