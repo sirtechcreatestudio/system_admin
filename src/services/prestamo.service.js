@@ -125,6 +125,7 @@ exports.crearPrestamoCompleto = async (data) => {
   const montoN   = parseFloat(monto);
   const interesN = parseFloat(interes);
   const plazoN   = parseInt(plazo);
+  const plazoOriginalN = plazoN; 
 
   const cuota = calcularCuotaFrecuencia(montoN, interesN, plazoN, frecuencia_pago);
   const tasa  = tasaPorFrecuencia(interesN, frecuencia_pago);
@@ -138,6 +139,7 @@ exports.crearPrestamoCompleto = async (data) => {
       monto:          montoN,
       interes:        interesN,
       plazo:          plazoN,
+      // plazo_original: plazoOriginalN,
       frecuencia_pago,
       estado:         'pendiente',
       fecha_inicio:   fechaBase,
