@@ -239,7 +239,7 @@ const PrestamoController = {
           prestamo_id: prestamoId
         },
         include: {
-          prestamos: true
+          prestamo: true
         }
       });
 
