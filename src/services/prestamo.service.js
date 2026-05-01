@@ -234,14 +234,20 @@ async function registrarPago(prestamoId, cuotaId, data) {
   const { fecha_pago, monto_pagado, notas, usuario_id } = data;
   const fechaPago = fecha_pago ? new Date(fecha_pago) : new Date();
 
-  // ✅ CORREGIDO: prestamo (singular) en lugar de prestamos
+  // Obtener la cuota
   const cuota = await prisma.cuotas.findFirst({
-    where: { id: parseInt(cuotaId), prestamo_id: parseInt(prestamoId) },
-    include: { prestamo: true }  // ← Cambiado
+    where: { id: parseInt(cuotaId), prestamo_id: parseInt(prestamoId) }
   });
 
   if (!cuota) throw new Error('Cuota no encontrada');
   if (cuota.estado === 'pagado') throw new Error('Esta cuota ya fue pagada');
+
+  // ✅ Obtener el préstamo por separado
+  const prestamo = await prisma.prestamos.findUnique({
+    where: { id: parseInt(prestamoId) }
+  });
+
+  if (!prestamo) throw new Error('Préstamo no encontrado');
 
   const montoPagado = monto_pagado ? parseFloat(monto_pagado) : cuota.monto;
   if (montoPagado > cuota.monto) {
@@ -266,7 +272,7 @@ async function registrarPago(prestamoId, cuotaId, data) {
       await tx.amortizacion.update({
         where: { id: amortizacion.id },
         data: {
-          estado: montoPagado === cuota.monto ? 'pagado' : 'parcial',
+          estado: montoPagado === cuota.monto ? 'pagado' : 'pendiente',  // ← pendiente, no parcial
           fecha_pago: fechaPago
         }
       });
@@ -289,8 +295,8 @@ async function registrarPago(prestamoId, cuotaId, data) {
       _sum: { monto_pagado: true }
     });
 
-    // ✅ CORREGIDO: cuota.prestamo (singular) en lugar de cuota.prestamos
-    const nuevoSaldo = cuota.prestamo.monto - (totalPagado._sum.monto_pagado || 0);
+    // ✅ Usar prestamo.monto (que obtuvimos aparte)
+    const nuevoSaldo = prestamo.monto - (totalPagado._sum.monto_pagado || 0);
     await tx.prestamos.update({
       where: { id: parseInt(prestamoId) },
       data: { saldo_actual: nuevoSaldo > 0 ? nuevoSaldo : 0 }
