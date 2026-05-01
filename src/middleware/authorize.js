@@ -1,11 +1,21 @@
-const prisma = require('../config/database');
+// src/middleware/authorize.js
+// FIX: usa '../config/prisma' (singleton correcto), no '../config/database'
+
+const prisma = require('../config/prisma');
 
 // Middleware para verificar permisos específicos
 const authorize = (permisoRequerido = null) => {
   return async (req, res, next) => {
     try {
-      const userId = req.user.id;
-      
+      const userId = req.user?.id;
+
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          message: 'No autorizado'
+        });
+      }
+
       // Obtener usuario con su rol y permisos
       const usuario = await prisma.usuarios.findUnique({
         where: { id: userId },
@@ -13,9 +23,7 @@ const authorize = (permisoRequerido = null) => {
           roles: {
             include: {
               rol_permisos: {
-                include: {
-                  permisos: true
-                }
+                include: { permisos: true }
               }
             }
           }
@@ -29,24 +37,24 @@ const authorize = (permisoRequerido = null) => {
         });
       }
 
-      // Si es admin (rol_id = 1), tiene todos los permisos
+      const permisosUsuario = usuario.roles?.rol_permisos?.map(rp => rp.permisos.nombre) || [];
+
+      // Admin (rol_id = 1) tiene acceso total — no consulta permisos
       if (usuario.rol_id === 1) {
-        req.user.rol = 'admin';
-        req.user.permisos = ['*']; // Todos los permisos
+        req.user.rol      = usuario.roles?.nombre || 'administrador';
+        req.user.permisos = ['*'];
         return next();
       }
 
-      // Si no se requiere permiso específico, solo verificamos que esté autenticado
+      // Sin permiso requerido — solo verifica autenticación
       if (!permisoRequerido) {
-        req.user.rol = usuario.roles?.nombre || 'usuario';
-        req.user.permisos = usuario.roles?.rol_permisos?.map(rp => rp.permisos.nombre) || [];
+        req.user.rol      = usuario.roles?.nombre || 'usuario';
+        req.user.permisos = permisosUsuario;
         return next();
       }
 
       // Verificar permiso específico
-      const tienePermiso = usuario.roles?.rol_permisos?.some(
-        rp => rp.permisos.nombre === permisoRequerido
-      );
+      const tienePermiso = permisosUsuario.includes(permisoRequerido);
 
       if (!tienePermiso) {
         return res.status(403).json({
@@ -55,9 +63,9 @@ const authorize = (permisoRequerido = null) => {
         });
       }
 
-      req.user.rol = usuario.roles?.nombre || 'usuario';
-      req.user.permisos = usuario.roles?.rol_permisos?.map(rp => rp.permisos.nombre) || [];
-      
+      req.user.rol      = usuario.roles?.nombre || 'usuario';
+      req.user.permisos = permisosUsuario;
+
       next();
     } catch (error) {
       console.error('Error en authorize:', error);
@@ -72,15 +80,15 @@ const authorize = (permisoRequerido = null) => {
 // Middleware para verificar rol específico
 const hasRole = (...rolesPermitidos) => {
   return (req, res, next) => {
-    const userRole = req.user.rol;
-    
+    const userRole = req.user?.rol;
+
     if (!rolesPermitidos.includes(userRole)) {
       return res.status(403).json({
         success: false,
         message: 'Acceso denegado - Rol no autorizado'
       });
     }
-    
+
     next();
   };
 };
