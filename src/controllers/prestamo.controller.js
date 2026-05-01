@@ -265,7 +265,7 @@ const PrestamoController = {
         await tx.cuotas.update({
           where: { id: cuotaId },
           data: {
-            estado: montoPagado === cuota.monto ? 'pagado' : 'parcial',
+            estado: montoPagado === cuota.monto ? 'pagado' : 'pendiente',
             fecha_pago: fechaPago,
             monto_pagado: montoPagado
           }
@@ -282,7 +282,7 @@ const PrestamoController = {
           await tx.amortizacion.update({
             where: { id: amortizacion.id },
             data: {
-              estado: montoPagado === cuota.monto ? 'pagado' : 'parcial',
+              estado: montoPagado === cuota.monto ? 'pagado' : 'pendiente',
               fecha_pago: fechaPago
             }
           });
