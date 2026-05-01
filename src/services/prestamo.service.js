@@ -1,20 +1,10 @@
 // src/services/prestamo.service.js
-// CORRECCIONES:
-// 1. saldo_actual se inicializa al crear el préstamo
-// 2. Soporte completo de frecuencias: diaria, semanal, quincenal, mensual
-// 3. Cálculo de cuota adaptado a cada frecuencia
-// 4. fechas de vencimiento calculadas según frecuencia real
-
 const prisma = require('../config/prisma');
 
 // -------------------------------------------------------
 // Helpers de frecuencia
 // -------------------------------------------------------
 
-/**
- * Retorna la tasa de interés por período según la frecuencia.
- * interesAnual es un porcentaje (ej: 20 = 20%)
- */
 function tasaPorFrecuencia(interesAnual, frecuencia) {
   const anual = interesAnual / 100;
   switch (frecuencia) {
@@ -26,10 +16,6 @@ function tasaPorFrecuencia(interesAnual, frecuencia) {
   }
 }
 
-/**
- * Calcula la cuota fija (French/anualidad) para la frecuencia dada.
- * plazo = número de cuotas en esa frecuencia.
- */
 function calcularCuotaFrecuencia(monto, interesAnual, plazo, frecuencia = 'mensual') {
   if (!monto || !interesAnual || !plazo || plazo === 0) return 0;
   const r = tasaPorFrecuencia(interesAnual, frecuencia);
@@ -38,9 +24,6 @@ function calcularCuotaFrecuencia(monto, interesAnual, plazo, frecuencia = 'mensu
   return parseFloat(cuota.toFixed(2));
 }
 
-/**
- * Suma 'n' períodos a una fecha según la frecuencia.
- */
 function sumarPeriodo(fecha, n, frecuencia) {
   const d = new Date(fecha);
   switch (frecuencia) {
@@ -60,9 +43,12 @@ function sumarPeriodo(fecha, n, frecuencia) {
   return d;
 }
 
-// -------------------------------------------------------
-// Calcular cuota (mensual legacy — para listados)
-// -------------------------------------------------------
+// Normalizar frecuencia: el frontend Vue usa 'diario', el service usa 'diaria'
+function normalizarFrecuencia(frecuencia) {
+  if (frecuencia === 'diario') return 'diaria';
+  return frecuencia || 'mensual';
+}
+
 function calcularCuota(monto, interes, plazo) {
   return calcularCuotaFrecuencia(monto, interes, plazo, 'mensual');
 }
@@ -83,7 +69,7 @@ exports.listarPrestamos = async () => {
     cliente: p.clientes,
     saldo_actual: Number(p.saldo_actual ?? p.monto),
     cuota_calculada: calcularCuotaFrecuencia(
-      Number(p.monto), Number(p.interes), p.plazo, p.frecuencia_pago || 'mensual'
+      Number(p.monto), Number(p.interes), p.plazo, normalizarFrecuencia(p.frecuencia_pago)
     )
   }));
 };
@@ -104,7 +90,7 @@ exports.obtenerPrestamoPorId = async (id) => {
     saldo_actual: Number(prestamo.saldo_actual ?? prestamo.monto),
     cuota_calculada: calcularCuotaFrecuencia(
       Number(prestamo.monto), Number(prestamo.interes), prestamo.plazo,
-      prestamo.frecuencia_pago || 'mensual'
+      normalizarFrecuencia(prestamo.frecuencia_pago)
     )
   };
 };
@@ -117,33 +103,34 @@ exports.crearPrestamoCompleto = async (data) => {
     frecuencia_pago = 'mensual'
   } = data;
 
+  // Normalizar 'diario' → 'diaria' (frontend Vue usa 'diario')
+  const frecNorm = normalizarFrecuencia(frecuencia_pago);
   const frecuencias = ['diaria', 'semanal', 'quincenal', 'mensual'];
-  if (!frecuencias.includes(frecuencia_pago)) {
+  if (!frecuencias.includes(frecNorm)) {
     throw new Error(`Frecuencia inválida. Use: ${frecuencias.join(', ')}`);
   }
 
-  const montoN   = parseFloat(monto);
-  const interesN = parseFloat(interes);
-  const plazoN   = parseInt(plazo);
-  const plazoOriginalN = plazoN; 
+  const montoN        = parseFloat(monto);
+  const interesN      = parseFloat(interes);
+  const plazoN        = parseInt(plazo);
+  const plazoOriginalN = plazoN;
 
-  const cuota = calcularCuotaFrecuencia(montoN, interesN, plazoN, frecuencia_pago);
-  const tasa  = tasaPorFrecuencia(interesN, frecuencia_pago);
+  const cuota = calcularCuotaFrecuencia(montoN, interesN, plazoN, frecNorm);
+  const tasa  = tasaPorFrecuencia(interesN, frecNorm);
 
   const fechaBase = fecha_inicio ? new Date(fecha_inicio) : new Date();
 
   return await prisma.$transaction(async (tx) => {
-    // Construir data con connect para relaciones Prisma
     const createData = {
-      clientes:       { connect: { id: parseInt(cliente_id) } },
-      monto:          montoN,
-      interes:        interesN,
-      plazo:          plazoN,
-      // plazo_original: plazoOriginalN,
-      frecuencia_pago,
-      estado:         'pendiente',
-      fecha_inicio:   fechaBase,
-      saldo_actual:   montoN   // ← inicializar saldo al monto completo
+      clientes:        { connect: { id: parseInt(cliente_id) } },
+      monto:           montoN,
+      interes:         interesN,
+      plazo:           plazoN,
+      plazo_original:  plazoOriginalN,
+      frecuencia_pago: frecNorm,
+      estado:          'pendiente',
+      fecha_inicio:    fechaBase,
+      saldo_actual:    montoN
     };
 
     if (tipo_prestamo_id && parseInt(tipo_prestamo_id) > 0) {
@@ -155,43 +142,49 @@ exports.crearPrestamoCompleto = async (data) => {
 
     const prestamo = await tx.prestamos.create({ data: createData });
 
+    // ✅ FIX: Calcular todos los datos en memoria primero (sin awaits en loop)
+    // luego insertar en batch con createMany — evita Transaction timeout en Neon serverless
+    const cuotasData       = [];
+    const amortizacionData = [];
     let saldo = montoN;
 
     for (let i = 1; i <= plazoN; i++) {
       const interesCuota = saldo * tasa;
       const capital      = cuota - interesCuota;
       saldo = Math.max(saldo - capital, 0);
+      const fechaVenc = sumarPeriodo(fechaBase, i, frecNorm);
 
-      const fechaVenc = sumarPeriodo(fechaBase, i, frecuencia_pago);
-
-      await tx.cuotas.create({
-        data: {
-          prestamo_id:       prestamo.id,
-          numero:            i,
-          monto:             cuota,
-          fecha_vencimiento: fechaVenc,
-          estado:            'pendiente'
-        }
+      cuotasData.push({
+        prestamo_id:       prestamo.id,
+        numero:            i,
+        monto:             cuota,
+        fecha_vencimiento: fechaVenc,
+        estado:            'pendiente'
       });
 
-      await tx.amortizacion.create({
-        data: {
-          prestamo_id:    prestamo.id,
-          numero_cuota:   i,
-          capital:        parseFloat(capital.toFixed(2)),
-          interes:        parseFloat(interesCuota.toFixed(2)),
-          saldo_restante: parseFloat(saldo.toFixed(2)),
-          fecha_pago:     fechaVenc,
-          estado:         'pendiente'
-        }
+      amortizacionData.push({
+        prestamo_id:    prestamo.id,
+        numero_cuota:   i,
+        capital:        parseFloat(capital.toFixed(2)),
+        interes:        parseFloat(interesCuota.toFixed(2)),
+        saldo_restante: parseFloat(saldo.toFixed(2)),
+        fecha_pago:     fechaVenc,
+        estado:         'pendiente'
       });
     }
+
+    // 2 inserciones batch en vez de N*2 queries individuales
+    await tx.cuotas.createMany({ data: cuotasData });
+    await tx.amortizacion.createMany({ data: amortizacionData });
 
     return {
       ...prestamo,
       cuota_calculada: cuota,
-      frecuencia_pago
+      frecuencia_pago: frecNorm
     };
+  }, {
+    maxWait: 10000,  // 10s para obtener conexión
+    timeout:  30000  // 30s para completar la transacción
   });
 };
 
