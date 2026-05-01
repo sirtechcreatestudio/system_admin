@@ -65,7 +65,6 @@ async function listarPrestamos() {
     monto: Number(p.monto),
     interes: Number(p.interes),
     plazo: p.plazo,
-    plazo_original: p.plazo_original,
     frecuencia_pago: p.frecuencia_pago,
     estado: p.estado,
     fecha_inicio: p.fecha_inicio,
@@ -117,12 +116,12 @@ async function crearPrestamo(data) {
   const plazoMesesEquiv = plazoEnMeses(plazoN, frecNorm);
 
   return await prisma.$transaction(async (tx) => {
+    // Crear préstamo - SIN plazo_original (como en tu código original)
     const createData = {
       clientes: { connect: { id: parseInt(cliente_id) } },
       monto: montoN,
       interes: interesMensual,
-      plazo: plazoMesesEquiv,
-      plazo_original: plazoN,
+      plazo: plazoMesesEquiv,  // solo guardamos esto
       frecuencia_pago: frecNorm,
       estado: 'pendiente',
       fecha_inicio: fechaBase,
