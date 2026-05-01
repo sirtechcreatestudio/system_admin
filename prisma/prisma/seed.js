@@ -1,272 +1,185 @@
+// prisma/seed.js
+// Seed completo: roles, permisos, asignaciones y usuario admin
+
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcrypt');
-
 const prisma = new PrismaClient();
 
+// ============================================================
+// 📋 PERMISOS por módulo
+// ============================================================
+const PERMISOS = [
+  // Dashboard
+  { nombre: 'ver_dashboard',       descripcion: 'Ver panel principal',         modulo: 'dashboard' },
+
+  // Clientes
+  { nombre: 'ver_clientes',        descripcion: 'Ver lista de clientes',        modulo: 'clientes' },
+  { nombre: 'crear_clientes',      descripcion: 'Crear nuevos clientes',        modulo: 'clientes' },
+  { nombre: 'editar_clientes',     descripcion: 'Editar clientes existentes',   modulo: 'clientes' },
+  { nombre: 'eliminar_clientes',   descripcion: 'Eliminar clientes',            modulo: 'clientes' },
+
+  // Préstamos
+  { nombre: 'ver_prestamos',       descripcion: 'Ver lista de préstamos',       modulo: 'prestamos' },
+  { nombre: 'crear_prestamos',     descripcion: 'Crear nuevos préstamos',       modulo: 'prestamos' },
+  { nombre: 'editar_prestamos',    descripcion: 'Editar préstamos existentes',  modulo: 'prestamos' },
+  { nombre: 'aprobar_prestamos',   descripcion: 'Aprobar préstamos',            modulo: 'prestamos' },
+  { nombre: 'eliminar_prestamos',  descripcion: 'Eliminar préstamos',           modulo: 'prestamos' },
+
+  // Pagos
+  { nombre: 'ver_pagos',           descripcion: 'Ver pagos registrados',        modulo: 'pagos' },
+  { nombre: 'registrar_pagos',     descripcion: 'Registrar nuevos pagos',       modulo: 'pagos' },
+  { nombre: 'anular_pagos',        descripcion: 'Anular pagos',                 modulo: 'pagos' },
+
+  // Caja
+  { nombre: 'ver_caja',            descripcion: 'Ver movimientos de caja',      modulo: 'caja' },
+  { nombre: 'abrir_caja',          descripcion: 'Abrir caja del día',           modulo: 'caja' },
+  { nombre: 'cerrar_caja',         descripcion: 'Cerrar caja del día',          modulo: 'caja' },
+
+  // Morosos
+  { nombre: 'ver_morosos',         descripcion: 'Ver clientes morosos',         modulo: 'morosos' },
+  { nombre: 'gestionar_cobros',    descripcion: 'Gestionar gestiones de cobro', modulo: 'morosos' },
+
+  // Reportes
+  { nombre: 'ver_reportes',        descripcion: 'Ver reportes generales',       modulo: 'reportes' },
+  { nombre: 'exportar_reportes',   descripcion: 'Exportar reportes a PDF/Excel',modulo: 'reportes' },
+
+  // Usuarios
+  { nombre: 'ver_usuarios',        descripcion: 'Ver lista de usuarios',        modulo: 'usuarios' },
+  { nombre: 'crear_usuarios',      descripcion: 'Crear nuevos usuarios',        modulo: 'usuarios' },
+  { nombre: 'editar_usuarios',     descripcion: 'Editar usuarios',              modulo: 'usuarios' },
+  { nombre: 'eliminar_usuarios',   descripcion: 'Eliminar usuarios',            modulo: 'usuarios' },
+
+  // Vehículos
+  { nombre: 'ver_vehiculos',       descripcion: 'Ver vehículos',                modulo: 'vehiculos' },
+  { nombre: 'crear_vehiculos',     descripcion: 'Crear vehículos',              modulo: 'vehiculos' },
+  { nombre: 'editar_vehiculos',    descripcion: 'Editar vehículos',             modulo: 'vehiculos' },
+
+  // Contratos
+  { nombre: 'ver_contratos',       descripcion: 'Ver contratos',                modulo: 'contratos' },
+  { nombre: 'crear_contratos',     descripcion: 'Generar contratos',            modulo: 'contratos' },
+
+  // Catálogos
+  { nombre: 'ver_catalogos',       descripcion: 'Ver catálogos del sistema',    modulo: 'catalogos' },
+  { nombre: 'editar_catalogos',    descripcion: 'Editar catálogos del sistema', modulo: 'catalogos' },
+];
+
+// ============================================================
+// 🎭 PERMISOS POR ROL
+// ============================================================
+
+// Rol 1: administrador → todos los permisos (se asignan en el código)
+// Rol 2: gestor → permisos operativos (sin admin de usuarios/catalogos)
+const PERMISOS_GESTOR = [
+  'ver_dashboard',
+  'ver_clientes', 'crear_clientes', 'editar_clientes',
+  'ver_prestamos', 'crear_prestamos', 'editar_prestamos', 'aprobar_prestamos',
+  'ver_pagos', 'registrar_pagos',
+  'ver_caja', 'abrir_caja', 'cerrar_caja',
+  'ver_morosos', 'gestionar_cobros',
+  'ver_reportes', 'exportar_reportes',
+  'ver_vehiculos',
+  'ver_contratos', 'crear_contratos',
+];
+
+// Rol 3: usuario → solo lectura + operaciones básicas
+const PERMISOS_USUARIO = [
+  'ver_dashboard',
+  'ver_clientes',
+  'ver_prestamos',
+  'ver_pagos', 'registrar_pagos',
+  'ver_caja',
+  'ver_morosos',
+  'ver_reportes',
+  'ver_vehiculos',
+];
+
 async function main() {
-  console.log('🌱 Iniciando seed de roles y permisos...');
+  console.log('🌱 Ejecutando seed completo...\n');
 
-  // 1. Crear roles
-  console.log('📌 Creando roles...');
-  
-  const adminRole = await prisma.roles.upsert({
-    where: { nombre: 'admin' },
-    update: {},
-    create: {
-      nombre: 'admin',
-      descripcion: 'Administrador del sistema - Acceso total'
-    }
-  });
-  console.log('✅ Rol admin creado');
-
-  const supervisorRole = await prisma.roles.upsert({
-    where: { nombre: 'supervisor' },
-    update: {},
-    create: {
-      nombre: 'supervisor',
-      descripcion: 'Supervisor - Puede ver reportes y gestionar'
-    }
-  });
-  console.log('✅ Rol supervisor creado');
-
-  const usuarioRole = await prisma.roles.upsert({
-    where: { nombre: 'usuario' },
-    update: {},
-    create: {
-      nombre: 'usuario',
-      descripcion: 'Usuario regular - Operaciones básicas'
-    }
-  });
-  console.log('✅ Rol usuario creado');
-
-  const cajeroRole = await prisma.roles.upsert({
-    where: { nombre: 'cajero' },
-    update: {},
-    create: {
-      nombre: 'cajero',
-      descripcion: 'Cajero - Solo puede registrar pagos'
-    }
-  });
-  console.log('✅ Rol cajero creado');
-
-  // 2. Crear permisos
-  console.log('📌 Creando permisos...');
-  
-  const permisosData = [
-    // Préstamos
-    { nombre: 'crear_prestamo', descripcion: 'Crear nuevos préstamos', modulo: 'prestamos' },
-    { nombre: 'editar_prestamo', descripcion: 'Editar préstamos existentes', modulo: 'prestamos' },
-    { nombre: 'eliminar_prestamo', descripcion: 'Eliminar préstamos', modulo: 'prestamos' },
-    { nombre: 'ver_prestamos', descripcion: 'Ver lista de préstamos', modulo: 'prestamos' },
-    
-    // Clientes
-    { nombre: 'crear_cliente', descripcion: 'Crear nuevos clientes', modulo: 'clientes' },
-    { nombre: 'editar_cliente', descripcion: 'Editar clientes', modulo: 'clientes' },
-    { nombre: 'eliminar_cliente', descripcion: 'Eliminar clientes', modulo: 'clientes' },
-    { nombre: 'ver_clientes', descripcion: 'Ver lista de clientes', modulo: 'clientes' },
-    
-    // Pagos
-    { nombre: 'registrar_pago', descripcion: 'Registrar pagos', modulo: 'pagos' },
-    { nombre: 'ver_pagos', descripcion: 'Ver historial de pagos', modulo: 'pagos' },
-    { nombre: 'anular_pago', descripcion: 'Anular pagos', modulo: 'pagos' },
-    
-    // Caja
-    { nombre: 'ver_caja', descripcion: 'Ver estado de caja', modulo: 'caja' },
-    { nombre: 'abrir_caja', descripcion: 'Abrir caja', modulo: 'caja' },
-    { nombre: 'cerrar_caja', descripcion: 'Cerrar caja', modulo: 'caja' },
-    { nombre: 'registrar_ingreso', descripcion: 'Registrar ingresos', modulo: 'caja' },
-    { nombre: 'registrar_egreso', descripcion: 'Registrar egresos', modulo: 'caja' },
-    
-    // Reportes
-    { nombre: 'ver_reportes', descripcion: 'Ver reportes', modulo: 'reportes' },
-    { nombre: 'exportar_reportes', descripcion: 'Exportar reportes', modulo: 'reportes' },
-    
-    // Usuarios
-    { nombre: 'gestionar_usuarios', descripcion: 'Crear/editar/eliminar usuarios', modulo: 'usuarios' },
-    { nombre: 'ver_usuarios', descripcion: 'Ver lista de usuarios', modulo: 'usuarios' },
-    
-    // Dashboard
-    { nombre: 'ver_dashboard', descripcion: 'Ver dashboard principal', modulo: 'dashboard' },
-    
-    // Configuración
-    { nombre: 'configurar_sistema', descripcion: 'Configurar parámetros del sistema', modulo: 'configuracion' },
+  // ── Roles ──────────────────────────────────────────────────
+  const roles = [
+    { id: 1, nombre: 'administrador', descripcion: 'Acceso total al sistema' },
+    { id: 2, nombre: 'gestor',        descripcion: 'Gestión operativa de préstamos' },
+    { id: 3, nombre: 'usuario',       descripcion: 'Acceso básico de consulta' },
   ];
 
-  for (const permiso of permisosData) {
-    await prisma.permisos.upsert({
-      where: { nombre: permiso.nombre },
-      update: {},
-      create: permiso
+  for (const role of roles) {
+    await prisma.roles.upsert({
+      where: { id: role.id },
+      update: { nombre: role.nombre, descripcion: role.descripcion },
+      create: role,
     });
   }
-  console.log(`✅ ${permisosData.length} permisos creados`);
+  console.log('✅ Roles creados');
 
-  // 3. Asignar permisos a roles
-  console.log('📌 Asignando permisos a roles...');
-  
-  const todosPermisos = await prisma.permisos.findMany();
-  
-  // Admin - TODOS los permisos
-  for (const permiso of todosPermisos) {
+  // ── Permisos ───────────────────────────────────────────────
+  const permisosCreados = [];
+  for (const permiso of PERMISOS) {
+    const p = await prisma.permisos.upsert({
+      where:  { nombre: permiso.nombre },
+      update: { descripcion: permiso.descripcion, modulo: permiso.modulo },
+      create: permiso,
+    });
+    permisosCreados.push(p);
+  }
+  console.log(`✅ ${permisosCreados.length} permisos creados/actualizados`);
+
+  // Helper para buscar permiso por nombre
+  const getPermiso = (nombre) => permisosCreados.find(p => p.nombre === nombre);
+
+  // ── Asignar permisos al rol: administrador (todos) ─────────
+  for (const permiso of permisosCreados) {
     await prisma.rol_permisos.upsert({
-      where: {
-        rol_id_permiso_id: {
-          rol_id: adminRole.id,
-          permiso_id: permiso.id
-        }
-      },
+      where:  { rol_id_permiso_id: { rol_id: 1, permiso_id: permiso.id } },
       update: {},
-      create: {
-        rol_id: adminRole.id,
-        permiso_id: permiso.id
-      }
+      create: { rol_id: 1, permiso_id: permiso.id },
     });
   }
-  console.log(`✅ Admin: ${todosPermisos.length} permisos asignados`);
+  console.log('✅ Permisos asignados a administrador (todos)');
 
-  // Supervisor - Permisos específicos
-  const permisosSupervisor = [
-    'ver_prestamos', 'crear_prestamo', 'editar_prestamo',
-    'ver_clientes', 'crear_cliente', 'editar_cliente',
-    'registrar_pago', 'ver_pagos',
-    'ver_caja', 'ver_reportes', 'exportar_reportes',
-    'ver_dashboard', 'ver_usuarios'
-  ];
-  
-  for (const nombrePermiso of permisosSupervisor) {
-    const permiso = todosPermisos.find(p => p.nombre === nombrePermiso);
-    if (permiso) {
-      await prisma.rol_permisos.upsert({
-        where: {
-          rol_id_permiso_id: {
-            rol_id: supervisorRole.id,
-            permiso_id: permiso.id
-          }
-        },
-        update: {},
-        create: {
-          rol_id: supervisorRole.id,
-          permiso_id: permiso.id
-        }
-      });
-    }
+  // ── Asignar permisos al rol: gestor ───────────────────────
+  for (const nombrePermiso of PERMISOS_GESTOR) {
+    const permiso = getPermiso(nombrePermiso);
+    if (!permiso) continue;
+    await prisma.rol_permisos.upsert({
+      where:  { rol_id_permiso_id: { rol_id: 2, permiso_id: permiso.id } },
+      update: {},
+      create: { rol_id: 2, permiso_id: permiso.id },
+    });
   }
-  console.log(`✅ Supervisor: ${permisosSupervisor.length} permisos asignados`);
+  console.log('✅ Permisos asignados a gestor');
 
-  // Usuario - Permisos básicos
-  const permisosUsuario = [
-    'ver_prestamos', 'ver_clientes', 
-    'registrar_pago', 'ver_pagos',
-    'ver_dashboard'
-  ];
-  
-  for (const nombrePermiso of permisosUsuario) {
-    const permiso = todosPermisos.find(p => p.nombre === nombrePermiso);
-    if (permiso) {
-      await prisma.rol_permisos.upsert({
-        where: {
-          rol_id_permiso_id: {
-            rol_id: usuarioRole.id,
-            permiso_id: permiso.id
-          }
-        },
-        update: {},
-        create: {
-          rol_id: usuarioRole.id,
-          permiso_id: permiso.id
-        }
-      });
-    }
+  // ── Asignar permisos al rol: usuario ──────────────────────
+  for (const nombrePermiso of PERMISOS_USUARIO) {
+    const permiso = getPermiso(nombrePermiso);
+    if (!permiso) continue;
+    await prisma.rol_permisos.upsert({
+      where:  { rol_id_permiso_id: { rol_id: 3, permiso_id: permiso.id } },
+      update: {},
+      create: { rol_id: 3, permiso_id: permiso.id },
+    });
   }
-  console.log(`✅ Usuario: ${permisosUsuario.length} permisos asignados`);
+  console.log('✅ Permisos asignados a usuario');
 
-  // Cajero - Solo pagos y caja
-  const permisosCajero = [
-    'registrar_pago', 'ver_pagos',
-    'ver_caja', 'registrar_ingreso',
-    'ver_dashboard', 'ver_clientes'
-  ];
-  
-  for (const nombrePermiso of permisosCajero) {
-    const permiso = todosPermisos.find(p => p.nombre === nombrePermiso);
-    if (permiso) {
-      await prisma.rol_permisos.upsert({
-        where: {
-          rol_id_permiso_id: {
-            rol_id: cajeroRole.id,
-            permiso_id: permiso.id
-          }
-        },
-        update: {},
-        create: {
-          rol_id: cajeroRole.id,
-          permiso_id: permiso.id
-        }
-      });
-    }
-  }
-  console.log(`✅ Cajero: ${permisosCajero.length} permisos asignados`);
+  // ── Usuario admin ──────────────────────────────────────────
+  const hashedPassword = await bcrypt.hash('Stream2011@', 10);
 
-  // 4. Crear usuarios de prueba
-  console.log('📌 Creando usuarios de prueba...');
-  
-  const adminPassword = await bcrypt.hash('admin123', 10);
   await prisma.usuarios.upsert({
-    where: { email: 'admin@sistema.com' },
+    where:  { email: 'yrodriguez@caribeazul.com' },
     update: {},
     create: {
-      nombre: 'Administrador',
-      email: 'admin@sistema.com',
-      password: adminPassword,
-      rol_id: adminRole.id,
-      estado: 'activo'
-    }
+      nombre:   'Y Rodriguez',
+      email:    'yrodriguez@caribeazul.com',
+      password: hashedPassword,
+      rol_id:   1,
+      estado:   'activo',
+    },
   });
-  console.log('✅ Usuario admin@sistema.com / admin123');
 
-  const supervisorPassword = await bcrypt.hash('super123', 10);
-  await prisma.usuarios.upsert({
-    where: { email: 'supervisor@sistema.com' },
-    update: {},
-    create: {
-      nombre: 'Supervisor',
-      email: 'supervisor@sistema.com',
-      password: supervisorPassword,
-      rol_id: supervisorRole.id,
-      estado: 'activo'
-    }
-  });
-  console.log('✅ Usuario supervisor@sistema.com / super123');
-
-  const usuarioPassword = await bcrypt.hash('usuario123', 10);
-  await prisma.usuarios.upsert({
-    where: { email: 'usuario@sistema.com' },
-    update: {},
-    create: {
-      nombre: 'Usuario Regular',
-      email: 'usuario@sistema.com',
-      password: usuarioPassword,
-      rol_id: usuarioRole.id,
-      estado: 'activo'
-    }
-  });
-  console.log('✅ Usuario usuario@sistema.com / usuario123');
-
-  const cajeroPassword = await bcrypt.hash('cajero123', 10);
-  await prisma.usuarios.upsert({
-    where: { email: 'cajero@sistema.com' },
-    update: {},
-    create: {
-      nombre: 'Cajero',
-      email: 'cajero@sistema.com',
-      password: cajeroPassword,
-      rol_id: cajeroRole.id,
-      estado: 'activo'
-    }
-  });
-  console.log('✅ Usuario cajero@sistema.com / cajero123');
-
-  console.log('🎉 Seed completado exitosamente!');
+  console.log('\n✅ Usuario admin listo');
+  console.log('📧 Email   : yrodriguez@caribeazul.com');
+  console.log('🔑 Password: Stream2011@');
+  console.log('\n🎉 Seed completado exitosamente');
 }
 
 main()
