@@ -7,6 +7,39 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model financiamientos {
+  id               Int                    @id @default(autoincrement())
+  numero_contrato  String                 @unique @db.VarChar(30)
+  estado           financiamientos_estado @default(activo)
+  fecha_creacion   DateTime               @default(now())
+  fecha_contrato   DateTime               @db.Date
+
+  cliente          Json
+  garante          Json
+  vehiculo         Json
+  prestamo         Json
+  terminos_legales Json
+  notario          Json
+  amortizacion     Json
+
+  vendedor         String    @db.VarChar(150)
+  created_by       Int?
+  updated_at       DateTime  @updatedAt
+  deleted_at       DateTime?
+
+  usuarios         usuarios? @relation(fields: [created_by], references: [id], onDelete: SetNull)
+
+  @@index([estado])
+  @@index([created_by])
+}
+
+enum financiamientos_estado {
+  activo
+  pagado
+  atrasado
+  cancelado
+}
+
 model activos_financiados {
   id          Int                       @id @default(autoincrement())
   prestamo_id Int?
@@ -219,6 +252,7 @@ model prestamos {
   monto               Decimal?              @db.Decimal(10, 2)
   interes             Decimal?              @db.Decimal(5, 2)
   plazo               Int?
+  plazo_original      Int?
   estado              prestamos_estado?
   fecha_inicio        DateTime?             @db.Date
   created_at          DateTime?             @default(now())
@@ -291,6 +325,7 @@ model usuarios {
   caja            caja[]
   gestiones_cobro gestiones_cobro[]
   logs_auditoria  logs_auditoria[]
+  financiamientos  financiamientos[]
   pagos           pagos[]
   roles           roles             @relation(fields: [rol_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
