@@ -1,425 +1,423 @@
-const router = require('express').Router();
+// src/routes/caja.routes.js
+// CORRECCIONES:
+// 1. La caja es COMPARTIDA por día (no por usuario_id).
+//    Antes: cada usuario abría su propia caja → Admin y Cajero veían registros distintos.
+//    Ahora: existe UNA sola caja abierta por día; todos los roles operan sobre ella.
+// 2. Se agrega el endpoint GET /caja/stream (SSE) para notificar en tiempo real
+//    a todos los clientes conectados cuando hay un movimiento, apertura o cierre.
+// 3. El endpoint GET /balance ahora devuelve la caja del día sin filtrar por usuario_id.
+// 4. Los endpoints /ingreso, /egreso y /cerrar también buscan la caja del día (no la del usuario).
+
+const router  = require('express').Router();
 const { authMiddleware } = require('../middleware/auth.middleware');
-const prisma = require('../config/prisma');
+const prisma   = require('../config/prisma');
 const PDFDocument = require('pdfkit');
 
 router.use(authMiddleware);
 
-// ============================================================
-// FUNCIONES AUXILIARES
-// ============================================================
-const formatDateTime = (date) => {
-  return new Date(date).toLocaleString('es-DO', {
-    hour: '2-digit',
-    minute: '2-digit',
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric'
-  });
-};
+// ──────────────────────────────────────────────────────────
+// SSE — clientes conectados (en memoria, sin Redis)
+// ──────────────────────────────────────────────────────────
+const clientes = new Set();
 
-// ============================================================
-// OBTENER BALANCE ACTUAL
-// ============================================================
+function broadcast(evento, data) {
+  const payload = `data: ${JSON.stringify({ evento, data })}\n\n`;
+  for (const res of clientes) {
+    try { res.write(payload); } catch (_) { clientes.delete(res); }
+  }
+}
+
+// GET /caja/stream — escuchar eventos en tiempo real
+router.get('/stream', (req, res) => {
+  res.setHeader('Content-Type',  'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection',    'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // nginx: desactivar buffering
+  res.flushHeaders();
+
+  // Ping cada 25 s para mantener viva la conexión
+  const ping = setInterval(() => {
+    try { res.write(': ping\n\n'); } catch (_) { /* conexión cerrada */ }
+  }, 25_000);
+
+  clientes.add(res);
+
+  req.on('close', () => {
+    clearInterval(ping);
+    clientes.delete(res);
+  });
+});
+
+// ──────────────────────────────────────────────────────────
+// Helper: caja del día (compartida — sin filtro de usuario)
+// ──────────────────────────────────────────────────────────
+async function getCajaDelDia(includeMovimientos = false) {
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+
+  return prisma.caja.findFirst({
+    where: {
+      fecha_apertura: { gte: hoy },
+      estado: 'abierta'
+    },
+    ...(includeMovimientos && {
+      include: {
+        movimientos_caja: { orderBy: { fecha: 'desc' } }
+      }
+    })
+  });
+}
+
+// ──────────────────────────────────────────────────────────
+// GET /caja/balance
+// ──────────────────────────────────────────────────────────
 router.get('/balance', async (req, res) => {
   try {
-    // Buscar caja abierta del día para el usuario actual
-    const hoy = new Date();
-    hoy.setHours(0, 0, 0, 0);
-    
-    const cajaAbierta = await prisma.caja.findFirst({
-      where: {
-        usuario_id: req.user.id,
-        fecha_apertura: { gte: hoy },
-        estado: 'abierta'
-      },
-      include: {
-        movimientos_caja: {
-          orderBy: { fecha: 'desc' }
-        }
-      }
-    });
+    const caja = await getCajaDelDia(true);
 
-    if (!cajaAbierta) {
-      return res.json({ 
-        success: true, 
-        data: { 
-          abierta: false,
-          balance: 0, 
-          ingresos: 0, 
-          egresos: 0,
-          movimientos: [] 
-        } 
+    if (!caja) {
+      return res.json({
+        success: true,
+        data: { abierta: false, balance: 0, ingresos: 0, egresos: 0, movimientos: [] }
       });
     }
 
-    // Calcular ingresos y egresos
-    const ingresos = cajaAbierta.movimientos_caja
+    const ingresos = caja.movimientos_caja
       .filter(m => m.tipo === 'ingreso')
-      .reduce((sum, m) => sum + Number(m.monto || 0), 0);
-    
-    const egresos = cajaAbierta.movimientos_caja
-      .filter(m => m.tipo === 'egreso')
-      .reduce((sum, m) => sum + Number(m.monto || 0), 0);
-    
-    const balance = ingresos - egresos;
+      .reduce((s, m) => s + Number(m.monto || 0), 0);
 
-    res.json({ 
-      success: true, 
+    const egresos = caja.movimientos_caja
+      .filter(m => m.tipo === 'egreso')
+      .reduce((s, m) => s + Number(m.monto || 0), 0);
+
+    res.json({
+      success: true,
       data: {
-        abierta: true,
-        caja_id: cajaAbierta.id,
-        fecha_apertura: cajaAbierta.fecha_apertura,
-        balance: balance,
-        ingresos: ingresos,
-        egresos: egresos,
-        movimientos: cajaAbierta.movimientos_caja.map(m => ({
-          id: m.id,
-          tipo: m.tipo,
-          monto: Number(m.monto),
+        abierta:        true,
+        caja_id:        caja.id,
+        fecha_apertura: caja.fecha_apertura,
+        balance:        ingresos - egresos,
+        ingresos,
+        egresos,
+        movimientos: caja.movimientos_caja.map(m => ({
+          id:          m.id,
+          tipo:        m.tipo,
+          monto:       Number(m.monto),
           descripcion: m.descripcion,
-          fecha: m.fecha
+          fecha:       m.fecha
         }))
-      } 
+      }
     });
-  } catch (error) {
-    console.error('Error obteniendo balance:', error);
-    res.status(500).json({ success: false, message: error.message });
+  } catch (err) {
+    console.error('Error en /balance:', err);
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// ============================================================
-// ABRIR CAJA
-// ============================================================
+// ──────────────────────────────────────────────────────────
+// POST /caja/abrir
+// Solo Admin / Cajero pueden abrir caja (el authMiddleware ya valida el rol).
+// Se permite UNA sola caja abierta por día.
+// ──────────────────────────────────────────────────────────
 router.post('/abrir', async (req, res) => {
   try {
-    const { monto_inicial, notas } = req.body;
-
-    // Verificar si ya hay una caja abierta
-    const hoy = new Date();
-    hoy.setHours(0, 0, 0, 0);
-    
-    const cajaExistente = await prisma.caja.findFirst({
-      where: {
-        usuario_id: req.user.id,
-        fecha_apertura: { gte: hoy },
-        estado: 'abierta'
-      }
-    });
-
+    const cajaExistente = await getCajaDelDia();
     if (cajaExistente) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Ya existe una caja abierta para hoy' 
+      return res.status(400).json({
+        success: false,
+        message: 'Ya existe una caja abierta hoy. Solo puede haber una caja activa por día.'
       });
     }
 
-    // Crear nueva caja
+    const { monto_inicial, notas } = req.body;
+
     const nuevaCaja = await prisma.caja.create({
       data: {
-        usuario_id: req.user.id,
+        usuario_id:     req.user.id,   // quién la abrió (auditoría)
         fecha_apertura: new Date(),
-        estado: 'abierta'
+        estado:         'abierta'
       }
     });
 
-    // Registrar monto inicial si es mayor a 0
     if (monto_inicial && parseFloat(monto_inicial) > 0) {
       await prisma.movimientos_caja.create({
         data: {
-          caja_id: nuevaCaja.id,
-          tipo: 'ingreso',
-          monto: parseFloat(monto_inicial),
-          descripcion: notas || 'Apertura de caja - Monto inicial',
-          fecha: new Date()
+          caja_id:     nuevaCaja.id,
+          tipo:        'ingreso',
+          monto:       parseFloat(monto_inicial),
+          descripcion: notas || 'Apertura de caja – Monto inicial',
+          fecha:       new Date()
         }
       });
     }
 
-    res.json({ 
-      success: true, 
-      message: 'Caja abierta exitosamente',
-      data: {
-        id: nuevaCaja.id,
-        fecha_apertura: nuevaCaja.fecha_apertura
-      }
+    // Notificar a todos los clientes SSE
+    broadcast('CAJA_ABIERTA', {
+      caja_id:        nuevaCaja.id,
+      fecha_apertura: nuevaCaja.fecha_apertura,
+      abierta_por:    req.user.nombre || req.user.email
     });
-  } catch (error) {
-    console.error('Error abriendo caja:', error);
-    res.status(500).json({ success: false, message: error.message });
+
+    res.json({
+      success: true,
+      message: 'Caja abierta exitosamente',
+      data: { id: nuevaCaja.id, fecha_apertura: nuevaCaja.fecha_apertura }
+    });
+  } catch (err) {
+    console.error('Error abriendo caja:', err);
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// ============================================================
-// REGISTRAR INGRESO
-// ============================================================
+// ──────────────────────────────────────────────────────────
+// POST /caja/ingreso
+// ──────────────────────────────────────────────────────────
 router.post('/ingreso', async (req, res) => {
   try {
     const { monto, descripcion } = req.body;
-
     if (!monto || parseFloat(monto) <= 0) {
       return res.status(400).json({ success: false, message: 'Monto inválido' });
     }
 
-    // Buscar caja abierta del día
-    const hoy = new Date();
-    hoy.setHours(0, 0, 0, 0);
-    
-    const cajaAbierta = await prisma.caja.findFirst({
-      where: {
-        usuario_id: req.user.id,
-        fecha_apertura: { gte: hoy },
-        estado: 'abierta'
-      }
-    });
-
-    if (!cajaAbierta) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'No hay una caja abierta. Debes abrir la caja primero.' 
-      });
+    const caja = await getCajaDelDia();
+    if (!caja) {
+      return res.status(400).json({ success: false, message: 'No hay caja abierta. Abre la caja primero.' });
     }
 
     const movimiento = await prisma.movimientos_caja.create({
       data: {
-        caja_id: cajaAbierta.id,
-        tipo: 'ingreso',
-        monto: parseFloat(monto),
-        descripcion: descripcion || 'Ingreso registrado',
-        fecha: new Date()
+        caja_id:     caja.id,
+        tipo:        'ingreso',
+        monto:       parseFloat(monto),
+        descripcion: descripcion || 'Ingreso manual',
+        fecha:       new Date()
       }
     });
 
-    res.json({ 
-      success: true, 
-      message: 'Ingreso registrado exitosamente',
+    // Recalcular balance para el broadcast
+    const balance = await calcularBalance(caja.id);
+
+    broadcast('NUEVO_MOVIMIENTO', {
+      id:           movimiento.id,
+      tipo:         'ingreso',
+      monto:        Number(movimiento.monto),
+      descripcion:  movimiento.descripcion,
+      fecha:        movimiento.fecha,
+      balance_nuevo: balance.total,
+      ingresos:     balance.ingresos,
+      egresos:      balance.egresos,
+      registrado_por: req.user.nombre || req.user.email
+    });
+
+    res.json({
+      success: true,
+      message: 'Ingreso registrado',
       data: {
-        id: movimiento.id,
-        tipo: 'ingreso',
-        monto: Number(movimiento.monto),
+        id:          movimiento.id,
+        tipo:        'ingreso',
+        monto:       Number(movimiento.monto),
         descripcion: movimiento.descripcion,
-        fecha: movimiento.fecha
+        fecha:       movimiento.fecha,
+        balance_actual: balance.total
       }
     });
-  } catch (error) {
-    console.error('Error registrando ingreso:', error);
-    res.status(500).json({ success: false, message: error.message });
+  } catch (err) {
+    console.error('Error en /ingreso:', err);
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// ============================================================
-// REGISTRAR EGRESO
-// ============================================================
+// ──────────────────────────────────────────────────────────
+// POST /caja/egreso
+// ──────────────────────────────────────────────────────────
 router.post('/egreso', async (req, res) => {
   try {
     const { monto, descripcion } = req.body;
-
     if (!monto || parseFloat(monto) <= 0) {
       return res.status(400).json({ success: false, message: 'Monto inválido' });
     }
 
-    // Buscar caja abierta del día
-    const hoy = new Date();
-    hoy.setHours(0, 0, 0, 0);
-    
-    const cajaAbierta = await prisma.caja.findFirst({
-      where: {
-        usuario_id: req.user.id,
-        fecha_apertura: { gte: hoy },
-        estado: 'abierta'
-      }
-    });
-
-    if (!cajaAbierta) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'No hay una caja abierta. Debes abrir la caja primero.' 
-      });
+    const caja = await getCajaDelDia();
+    if (!caja) {
+      return res.status(400).json({ success: false, message: 'No hay caja abierta. Abre la caja primero.' });
     }
 
     const movimiento = await prisma.movimientos_caja.create({
       data: {
-        caja_id: cajaAbierta.id,
-        tipo: 'egreso',
-        monto: parseFloat(monto),
-        descripcion: descripcion || 'Egreso registrado',
-        fecha: new Date()
+        caja_id:     caja.id,
+        tipo:        'egreso',
+        monto:       parseFloat(monto),
+        descripcion: descripcion || 'Egreso manual',
+        fecha:       new Date()
       }
     });
 
-    res.json({ 
-      success: true, 
-      message: 'Egreso registrado exitosamente',
+    const balance = await calcularBalance(caja.id);
+
+    broadcast('NUEVO_MOVIMIENTO', {
+      id:           movimiento.id,
+      tipo:         'egreso',
+      monto:        Number(movimiento.monto),
+      descripcion:  movimiento.descripcion,
+      fecha:        movimiento.fecha,
+      balance_nuevo: balance.total,
+      ingresos:     balance.ingresos,
+      egresos:      balance.egresos,
+      registrado_por: req.user.nombre || req.user.email
+    });
+
+    res.json({
+      success: true,
+      message: 'Egreso registrado',
       data: {
-        id: movimiento.id,
-        tipo: 'egreso',
-        monto: Number(movimiento.monto),
+        id:          movimiento.id,
+        tipo:        'egreso',
+        monto:       Number(movimiento.monto),
         descripcion: movimiento.descripcion,
-        fecha: movimiento.fecha
+        fecha:       movimiento.fecha,
+        balance_actual: balance.total
       }
     });
-  } catch (error) {
-    console.error('Error registrando egreso:', error);
-    res.status(500).json({ success: false, message: error.message });
+  } catch (err) {
+    console.error('Error en /egreso:', err);
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// ============================================================
-// CERRAR CAJA Y GENERAR REPORTE PDF
-// ============================================================
+// ──────────────────────────────────────────────────────────
+// POST /caja/cerrar — cierra la caja del día y genera PDF
+// ──────────────────────────────────────────────────────────
 router.post('/cerrar', async (req, res) => {
   try {
-    const { balance_final, total_ingresos, total_egresos, movimientos } = req.body;
-
-    // Buscar caja abierta
-    const hoy = new Date();
-    hoy.setHours(0, 0, 0, 0);
-    
-    const cajaAbierta = await prisma.caja.findFirst({
-      where: {
-        usuario_id: req.user.id,
-        fecha_apertura: { gte: hoy },
-        estado: 'abierta'
-      },
-      include: {
-        movimientos_caja: true
-      }
-    });
-
-    if (!cajaAbierta) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'No hay una caja abierta para cerrar' 
-      });
+    const caja = await getCajaDelDia(true);
+    if (!caja) {
+      return res.status(400).json({ success: false, message: 'No hay caja abierta para cerrar.' });
     }
 
-    // Actualizar caja como cerrada
+    // Calcular desde BD (no confiar en el payload del cliente)
+    const balance = await calcularBalance(caja.id);
+
     await prisma.caja.update({
-      where: { id: cajaAbierta.id },
-      data: {
-        estado: 'cerrada',
-        fecha_cierre: new Date()
-      }
+      where: { id: caja.id },
+      data:  { estado: 'cerrada', fecha_cierre: new Date() }
+    });
+
+    // Notificar cierre a todos antes de cerrar la conexión con el PDF
+    broadcast('CAJA_CERRADA', {
+      caja_id:       caja.id,
+      balance_final: balance.total,
+      cerrada_por:   req.user.nombre || req.user.email
     });
 
     // Generar PDF del reporte
-    const doc = new PDFDocument({ margin: 30 });
+    const doc = new PDFDocument({ margin: 40, size: 'A4' });
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename=cierre-caja-${new Date().toISOString().split('T')[0]}.pdf`);
+    res.setHeader('Content-Disposition',
+      `attachment; filename=cierre-caja-${new Date().toISOString().split('T')[0]}.pdf`);
     doc.pipe(res);
 
-    // Header
-    doc.fontSize(18).font('Helvetica-Bold').text('REPORTE DE CIERRE DE CAJA', { align: 'center' });
-    doc.moveDown();
-    doc.fontSize(10).font('Helvetica');
-    doc.text(`Fecha de cierre: ${new Date().toLocaleString('es-DO')}`, { align: 'center' });
-    doc.text(`Cajero: ${req.user.nombre || req.user.email}`, { align: 'center' });
-    doc.moveDown(2);
+    // ── Encabezado ──
+    doc.fontSize(20).font('Helvetica-Bold')
+      .text('REPORTE DE CIERRE DE CAJA', { align: 'center' });
+    doc.moveDown(0.4);
+    doc.fontSize(10).font('Helvetica')
+      .text(`Fecha: ${new Date().toLocaleString('es-DO')}`, { align: 'center' })
+      .text(`Cerrado por: ${req.user.nombre || req.user.email}`, { align: 'center' });
+    doc.moveDown(1.5);
 
-    // Resumen
-    doc.fontSize(12).font('Helvetica-Bold').text('RESUMEN DEL DÍA', { underline: true });
+    // ── Resumen ──
+    doc.fontSize(13).font('Helvetica-Bold').text('RESUMEN', { underline: true });
     doc.moveDown(0.5);
-    doc.fontSize(11).font('Helvetica');
-    doc.text(`Total Ingresos: RD$ ${(total_ingresos || 0).toLocaleString('es-DO')}`);
-    doc.text(`Total Egresos: RD$ ${(total_egresos || 0).toLocaleString('es-DO')}`);
-    doc.text(`Balance Final: RD$ ${(balance_final || 0).toLocaleString('es-DO')}`);
-    doc.moveDown();
+    doc.fontSize(11).font('Helvetica')
+      .text(`Total Ingresos : RD$ ${balance.ingresos.toLocaleString('es-DO', { minimumFractionDigits: 2 })}`)
+      .text(`Total Egresos  : RD$ ${balance.egresos.toLocaleString('es-DO', { minimumFractionDigits: 2 })}`)
+      .text(`Balance Final  : RD$ ${balance.total.toLocaleString('es-DO', { minimumFractionDigits: 2 })}`);
+    doc.moveDown(1.5);
 
-    // Tabla de movimientos
-    if (movimientos && movimientos.length > 0) {
-      doc.fontSize(11).font('Helvetica-Bold').text('DETALLE DE MOVIMIENTOS', { underline: true });
-      doc.moveDown(0.5);
+    // ── Movimientos ──
+    const movs = caja.movimientos_caja;
+    if (movs.length > 0) {
+      doc.fontSize(13).font('Helvetica-Bold').text('DETALLE DE MOVIMIENTOS', { underline: true });
+      doc.moveDown(0.6);
 
-      let y = doc.y;
-      const startX = 50;
-      const colWidths = [80, 200, 100];
-      const headers = ['Hora', 'Concepto', 'Monto'];
+      const colX   = [40, 110, 240, 430];
+      const colW   = [60, 120, 180, 110];
+      const headers = ['Hora', 'Tipo', 'Concepto', 'Monto'];
 
       doc.fontSize(9).font('Helvetica-Bold');
-      let x = startX;
-      headers.forEach((h, i) => {
-        doc.text(h, x, y, { width: colWidths[i], align: 'center' });
-        x += colWidths[i];
-      });
+      headers.forEach((h, i) => doc.text(h, colX[i], doc.y, { width: colW[i], align: i === 3 ? 'right' : 'left' }));
 
-      y += 20;
+      let y = doc.y + 14;
       doc.fontSize(8).font('Helvetica');
 
-      movimientos.forEach(m => {
-        if (y > 750) {
-          doc.addPage();
-          y = 50;
-          x = startX;
-          doc.fontSize(9).font('Helvetica-Bold');
-          headers.forEach((h, i) => {
-            doc.text(h, x, y, { width: colWidths[i], align: 'center' });
-            x += colWidths[i];
-          });
-          y += 20;
-          doc.fontSize(8).font('Helvetica');
-        }
-
-        x = startX;
-        doc.text(m.hora || '—', x, y, { width: colWidths[0], align: 'center' });
-        x += colWidths[0];
-        doc.text(m.descripcion || '—', x, y, { width: colWidths[1], align: 'left' });
-        x += colWidths[1];
-        
+      for (const m of movs) {
+        if (y > 750) { doc.addPage(); y = 40; }
+        const hora  = new Date(m.fecha).toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' });
         const signo = m.tipo === 'ingreso' ? '+' : '-';
-        doc.fillColor(m.tipo === 'ingreso' ? '#16a34a' : '#dc2626')
-          .text(`${signo} RD$ ${Number(m.monto).toLocaleString('es-DO')}`, x, y, { width: colWidths[2], align: 'right' })
-          .fillColor('black');
+        const color = m.tipo === 'ingreso' ? '#16a34a' : '#dc2626';
 
-        y += 18;
-      });
+        doc.fillColor('#000').text(hora,             colX[0], y, { width: colW[0] });
+        doc.fillColor('#000').text(m.tipo,            colX[1], y, { width: colW[1] });
+        doc.fillColor('#000').text(m.descripcion||'—', colX[2], y, { width: colW[2] });
+        doc.fillColor(color).text(
+          `${signo} RD$ ${Number(m.monto).toLocaleString('es-DO', { minimumFractionDigits: 2 })}`,
+          colX[3], y, { width: colW[3], align: 'right' }
+        );
+        y += 16;
+      }
     }
 
     doc.end();
-  } catch (error) {
-    console.error('Error cerrando caja:', error);
-    res.status(500).json({ success: false, message: error.message });
+  } catch (err) {
+    console.error('Error cerrando caja:', err);
+    // Si ya enviamos headers (stream PDF) no podemos cambiar a JSON
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, message: err.message });
+    }
   }
 });
 
-// ============================================================
-// OBTENER MOVIMIENTOS DE LA CAJA ACTUAL
-// ============================================================
+// ──────────────────────────────────────────────────────────
+// GET /caja/movimientos
+// ──────────────────────────────────────────────────────────
 router.get('/movimientos', async (req, res) => {
   try {
-    const hoy = new Date();
-    hoy.setHours(0, 0, 0, 0);
-    
-    const cajaAbierta = await prisma.caja.findFirst({
-      where: {
-        usuario_id: req.user.id,
-        fecha_apertura: { gte: hoy },
-        estado: 'abierta'
-      },
-      include: {
-        movimientos_caja: {
-          orderBy: { fecha: 'desc' }
-        }
-      }
-    });
+    const caja = await getCajaDelDia(true);
+    if (!caja) return res.json({ success: true, data: [] });
 
-    if (!cajaAbierta) {
-      return res.json({ success: true, data: [] });
-    }
-
-    res.json({ 
-      success: true, 
-      data: cajaAbierta.movimientos_caja.map(m => ({
-        id: m.id,
-        tipo: m.tipo,
-        monto: Number(m.monto),
+    res.json({
+      success: true,
+      data: caja.movimientos_caja.map(m => ({
+        id:          m.id,
+        tipo:        m.tipo,
+        monto:       Number(m.monto),
         descripcion: m.descripcion,
-        fecha: m.fecha
+        fecha:       m.fecha
       }))
     });
-  } catch (error) {
-    console.error('Error obteniendo movimientos:', error);
-    res.status(500).json({ success: false, message: error.message });
+  } catch (err) {
+    console.error('Error en /movimientos:', err);
+    res.status(500).json({ success: false, message: err.message });
   }
 });
+
+// ──────────────────────────────────────────────────────────
+// Helper privado: calcular balance de una caja por ID
+// ──────────────────────────────────────────────────────────
+async function calcularBalance(cajaId) {
+  const [ing, egr] = await Promise.all([
+    prisma.movimientos_caja.aggregate({
+      where: { caja_id: cajaId, tipo: 'ingreso' },
+      _sum: { monto: true }
+    }),
+    prisma.movimientos_caja.aggregate({
+      where: { caja_id: cajaId, tipo: 'egreso' },
+      _sum: { monto: true }
+    })
+  ]);
+  const ingresos = Number(ing._sum.monto || 0);
+  const egresos  = Number(egr._sum.monto || 0);
+  return { ingresos, egresos, total: ingresos - egresos };
+}
 
 module.exports = router;
