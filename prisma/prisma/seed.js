@@ -168,7 +168,7 @@ async function main() {
     where:  { email: 'yrodriguez@caribeazul.com' },
     update: {},
     create: {
-      nombre:   'Y Rodriguez',
+      nombre:   'Yovanny Rodriguez',
       email:    'yrodriguez@caribeazul.com',
       password: hashedPassword,
       rol_id:   1,
@@ -176,10 +176,10 @@ async function main() {
     },
   });
 
-  console.log('\n✅ Usuario admin listo');
-  console.log('📧 Email   : yrodriguez@caribeazul.com');
-  console.log('🔑 Password: Stream2011@');
-  console.log('\n🎉 Seed completado exitosamente');
+  // console.log('\n✅ Usuario admin listo');
+  // console.log('📧 Email   : yrodriguez@caribeazul.com');
+  // console.log('🔑 Password: Stream2011@');
+  // console.log('\n🎉 Seed completado exitosamente');
 }
 
 main()
