@@ -31,9 +31,14 @@ app.use(pino({
 // 🚫 RATE LIMIT GLOBAL
 // =========================
 app.use('/api', rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
-  message: "Demasiadas solicitudes, intenta más tarde"
+  windowMs: 1 * 60 * 1000,
+  max: 500,
+  message: {
+    success: false,
+    message: "Demasiadas solicitudes. Espera un momento."
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
 }));
 
 // =========================
