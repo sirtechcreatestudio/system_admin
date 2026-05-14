@@ -3,12 +3,12 @@
 // src/routes/financiamiento.routes.js
 const { Router }   = require('express');
 const ctrl         = require('../controllers/financiamiento.controller');
-const { authenticate } = require('../middlewares/auth.middleware'); // ← tu middleware existente
+const { authMiddleware } = require('../middleware/auth.middleware'); // ← CORREGIDO
 
 const router = Router();
 
 // Todas las rutas del módulo requieren JWT válido
-router.use(authenticate);
+router.use(authMiddleware); // ← CORREGIDO
 
 // ⚠️  /stats DEBE ir ANTES de /:id para que Express no lo trate como un ID
 router.get ('/',       ctrl.listar);
