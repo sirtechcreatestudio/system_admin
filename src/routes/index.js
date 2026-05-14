@@ -39,7 +39,6 @@ router.use('/vehiculos', require('./vehiculos.routes'));
 // 📄 CONTRATOS
 router.use('/contratos', require('./contratos.routes'));
 
-// FINANCIAMIENTOS
-router.use('/financiamiento', require('./financiamiento.routes'))
+
 
 module.exports = router;
