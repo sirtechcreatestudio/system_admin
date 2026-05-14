@@ -32,5 +32,9 @@ router.use('/catalogos', require('./catalogos.routes'));
 // 👤 USUARIOS (perfil)
 router.use('/usuarios', require('./usuarios.routes'));
 
+// 💰 FINANCIAMIENTOS ← ¡AGREGAR ESTA LÍNEA!
+router.use('/financiamiento', require('./financiamiento.routes'));
+
+
 
 module.exports = router;
