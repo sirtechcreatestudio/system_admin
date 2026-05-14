@@ -14,7 +14,7 @@ router.use('/pagos', require('./pagos.routes'));
 // 📊 DASHBOARD
 router.use('/dashboard', require('./dashboard.routes'));
 
-// 🧍 CLIENTES (🔜 en construcción)
+// 🧍 CLIENTES
 router.use('/clientes', require('./clientes.routes'));
 
 // ⚠️ MOROSOS
@@ -32,14 +32,13 @@ router.use('/catalogos', require('./catalogos.routes'));
 // 👤 USUARIOS (perfil)
 router.use('/usuarios', require('./usuarios.routes'));
 
-// VEHICULOS
+// 🚗 VEHÍCULOS
 router.use('/vehiculos', require('./vehiculos.routes'));
 
- 
 // 📄 CONTRATOS
 router.use('/contratos', require('./contratos.routes'));
 
-// FINANCIAMIENTOS
-router.use('/financiamiento', require('./financiamiento.routes'))
+// 💰 FINANCIAMIENTOS ← ¡AGREGAR ESTA LÍNEA!
+router.use('/financiamiento', require('./financiamiento.routes'));
 
 module.exports = router;
