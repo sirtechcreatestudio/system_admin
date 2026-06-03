@@ -175,10 +175,6 @@ async function main() {
       estado:   'activo',
     },
   });
-
-  console.log('\n✅ Usuario admin listo');
-  console.log('📧 Email   : yrodriguez@caribeazul.com');
-  console.log('🔑 Password: Stream2011@');
   console.log('\n🎉 Seed completado exitosamente');
 }
 
