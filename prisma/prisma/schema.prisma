@@ -44,7 +44,17 @@ model caja {
 
   @@index([usuario_id])
 }
+model SystemSession {
+  id           Int      @id @default(autoincrement())
+  activated_by Int      // user_id del admin que activó
+  activated_at DateTime @default(now())
+  expires_at   DateTime // siempre será medianoche del día de activación
+  is_active    Boolean  @default(true)
 
+  admin User @relation(fields: [activated_by], references: [id])
+
+  @@map("system_sessions")
+}
 model clientes {
   id              Int               @id @default(autoincrement())
   nombre          String?           @db.VarChar(100)
