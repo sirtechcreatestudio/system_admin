@@ -8,24 +8,24 @@ const prisma      = require('../config/prisma');
 // -------------------------------------------------------
 // Helper: tasa por frecuencia
 // -------------------------------------------------------
-function tasaPorFrecuencia(interesAnual, frecuencia = 'mensual') {
-  const anual = interesAnual / 100;
-  switch (frecuencia) {
-    case 'diaria':    return anual / 365;
-    case 'semanal':   return anual / 52;
-    case 'quincenal': return anual / 24;
-    default:          return anual / 12;
-  }
-}
+// function tasaPorFrecuencia(interesAnual, frecuencia = 'mensual') {
+//   const anual = interesAnual / 100;
+//   switch (frecuencia) {
+//     case 'diaria':    return anual / 365;
+//     case 'semanal':   return anual / 52;
+//     case 'quincenal': return anual / 24;
+//     default:          return anual / 12;
+//   }
+// }
 
-function calcularCuotaFrecuencia(monto, interesAnual, plazo, frecuencia = 'mensual') {
-  if (!monto || !interesAnual || !plazo) return 0;
-  const r = tasaPorFrecuencia(interesAnual, frecuencia);
-  if (r === 0) return parseFloat((monto / plazo).toFixed(2));
-  return parseFloat(
-    (monto * (r * Math.pow(1 + r, plazo)) / (Math.pow(1 + r, plazo) - 1)).toFixed(2)
-  );
-}
+// function calcularCuotaFrecuencia(monto, interesAnual, plazo, frecuencia = 'mensual') {
+//   if (!monto || !interesAnual || !plazo) return 0;
+//   const r = tasaPorFrecuencia(interesAnual, frecuencia);
+//   if (r === 0) return parseFloat((monto / plazo).toFixed(2));
+//   return parseFloat(
+//     (monto * (r * Math.pow(1 + r, plazo)) / (Math.pow(1 + r, plazo) - 1)).toFixed(2)
+//   );
+// }
 
 function frecuenciaLabel(frecuencia) {
   const labels = {
@@ -71,7 +71,8 @@ exports.generarContratoPDF = async (prestamoId) => {
   const montoN      = Number(prestamo.monto);
   const interesN    = Number(prestamo.interes);
   const plazoN      = prestamo.plazo;
-  const cuotaValor  = calcularCuotaFrecuencia(montoN, interesN, plazoN, frecuencia);
+ // Tomamos el valor real de la cuota directamente desde la base de datos
+const cuotaValor = prestamo.cuotas.length > 0 ? Number(prestamo.cuotas[0].monto) : 0;
   const totalPagar  = cuotaValor * plazoN;
   const totalInteres = totalPagar - montoN;
   const fechaInicio = prestamo.fecha_inicio ? new Date(prestamo.fecha_inicio) : new Date();
@@ -170,7 +171,7 @@ exports.generarContratoPDF = async (prestamoId) => {
     // Grid 3 columnas
     const col1 = 60, col2 = 240, col3 = 420;
     campo('Monto Prestado',      formatMoney(montoN),           col1, yLoan,      160);
-    campo('Tasa de Interés',     `${interesN}% anual`,          col2, yLoan,      160);
+   campo('Tasa de Interés',     `${interesN}% ${frecuenciaLabel(frecuencia).toLowerCase()}`, col2, yLoan, 160);
     campo('Plazo',               `${plazoN} cuotas`,            col3, yLoan,      120);
 
     campo('Frecuencia de Pago',  frecuenciaLabel(frecuencia),   col1, yLoan + 40, 160);
@@ -270,7 +271,7 @@ exports.generarContratoPDF = async (prestamoId) => {
     clausula('PRIMERA', 'OBLIGACIÓN DE PAGO',
       `El PRESTATARIO, ${cliente.nombre?.toUpperCase()}, portador de la cédula de identidad y electoral No. ${cliente.cedula || '—'}, ` +
       `se compromete a pagar a FINANCIERA CARIBE AZUL S.R.L. la suma de ${formatMoney(montoN)}, ` +
-      `más los intereses pactados a una tasa del ${interesN}% anual, mediante ${plazoN} cuotas de pago ` +
+     `más los intereses pactados a una tasa del ${interesN}% ${frecuenciaLabel(frecuencia).toLowerCase()}, mediante ${plazoN} cuotas de pago ` +
       `${frecuenciaLabel(frecuencia).toLowerCase()}s de ${formatMoney(cuotaValor)} cada una, ` +
       `según el plan de pagos establecido en la Cláusula IV del presente contrato.`
     );
