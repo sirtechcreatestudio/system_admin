@@ -270,7 +270,7 @@ const cuotaValor = prestamo.cuotas.length > 0 ? Number(prestamo.cuotas[0].monto)
 
     clausula('PRIMERA', 'OBLIGACIÓN DE PAGO',
       `El PRESTATARIO, ${cliente.nombre?.toUpperCase()}, portador de la cédula de identidad y electoral No. ${cliente.cedula || '—'}, ` +
-      `se compromete a pagar a FINANCIERA CARIBE AZUL S.R.L. la suma de ${formatMoney(montoN)}, ` +
+      `se compromete a pagar a FINANCIERA CARIBE AZUL S.R.L. representada por el Sr. Cristian Vargas, dominicano mayor de edad portador de la cedula No. 001-1497135-1 la suma de ${formatMoney(montoN)}, ` +
      `más los intereses pactados a una tasa del ${interesN}% ${frecuenciaLabel(frecuencia).toLowerCase()}, mediante ${plazoN} cuotas de pago ` +
       `${frecuenciaLabel(frecuencia).toLowerCase()}s de ${formatMoney(cuotaValor)} cada una, ` +
       `según el plan de pagos establecido en la Cláusula IV del presente contrato.`
@@ -367,7 +367,7 @@ const cuotaValor = prestamo.cuotas.length > 0 ? Number(prestamo.cuotas[0].monto)
     // Línea firma financiera
     doc.moveTo(xFirma2, yFirmas + 40).lineTo(xFirma2 + firmaW, yFirmas + 40).strokeColor('#000').lineWidth(0.8).stroke();
     doc.font('Helvetica-Bold').fontSize(8).fillColor('#000000')
-      .text('FIRMA DEL REPRESENTANTE', xFirma2, yFirmas + 43, { width: firmaW, align: 'center' });
+      .text('SR. CRISTIAN VARGAS', xFirma2, yFirmas + 43, { width: firmaW, align: 'center' });
     doc.font('Helvetica').fontSize(7.5).fillColor(GRAY)
       .text('FINANCIERA CARIBE AZUL S.R.L.', xFirma2, yFirmas + 54, { width: firmaW, align: 'center' });
     doc.text('Sello / Firma Autorizada', xFirma2, yFirmas + 64, { width: firmaW, align: 'center' });
